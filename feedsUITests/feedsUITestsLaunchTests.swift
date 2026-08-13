@@ -20,6 +20,11 @@ final class feedsUITestsLaunchTests: XCTestCase {
     @MainActor
     func testLaunch() throws {
         let app = XCUIApplication()
+        app.launchArguments = [
+            "-ui-testing",
+            "-ui-testing-reset-preferences",
+            "-ui-testing-reset-scene-state",
+        ]
         app.launch()
 
         // Insert steps here to perform after app launch but before taking a screenshot,

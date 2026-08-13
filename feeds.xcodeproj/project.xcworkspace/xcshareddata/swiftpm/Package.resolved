@@ -1,0 +1,42 @@
+{
+  "originHash" : "efffc7cb8093805be4a7e1f229c390841cad1111584db8cc3d376cc9f13f71dd",
+  "pins" : [
+    {
+      "identity" : "defuddlekit",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/qiyangdev/DefuddleKit.git",
+      "state" : {
+        "revision" : "2fff8b69a7b08daf355bcc5ec2ac02e5e6a1fe41",
+        "version" : "0.1.0"
+      }
+    },
+    {
+      "identity" : "swift-concurrency-extras",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/pointfreeco/swift-concurrency-extras",
+      "state" : {
+        "revision" : "5fa253428866f2360c3754e88537f700ed2656b5",
+        "version" : "1.4.1"
+      }
+    },
+    {
+      "identity" : "swiftui-math",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/gonzalezreal/swiftui-math",
+      "state" : {
+        "revision" : "0b5c2cfaaec8d6193db206f675048eeb5ce95f71",
+        "version" : "0.1.0"
+      }
+    },
+    {
+      "identity" : "textual",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/gonzalezreal/textual.git",
+      "state" : {
+        "revision" : "01b51875a5406eefc95f52a058cb059e7bc94dc4",
+        "version" : "0.5.0"
+      }
+    }
+  ],
+  "version" : 3
+}
