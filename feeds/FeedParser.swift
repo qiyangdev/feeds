@@ -1,13 +1,13 @@
 import Foundation
 
-struct ParsedFeed: Equatable {
+nonisolated struct ParsedFeed: Equatable, Sendable {
     var title: String
     var siteURL: String?
     var summary: String
     var entries: [ParsedEntry]
 }
 
-struct ParsedEntry: Equatable {
+nonisolated struct ParsedEntry: Equatable, Sendable {
     var id: String
     var title: String
     var url: String?
@@ -16,7 +16,7 @@ struct ParsedEntry: Equatable {
     var publishedAt: Date
 }
 
-enum FeedParserError: LocalizedError {
+nonisolated enum FeedParserError: LocalizedError, Sendable {
     case invalidDocument
     case emptyFeed
 
@@ -30,7 +30,7 @@ enum FeedParserError: LocalizedError {
     }
 }
 
-final class FeedParser: NSObject, XMLParserDelegate {
+nonisolated final class FeedParser: NSObject, XMLParserDelegate {
     private struct EntryBuilder {
         var id = ""
         var title = ""
@@ -188,7 +188,7 @@ final class FeedParser: NSObject, XMLParserDelegate {
     }
 }
 
-private enum FeedDateParser {
+private nonisolated enum FeedDateParser {
     private static let formats = [
         "EEE, dd MMM yyyy HH:mm:ss Z",
         "EEE, d MMM yyyy HH:mm:ss Z",
@@ -211,7 +211,7 @@ private enum FeedDateParser {
     }
 }
 
-private extension String {
+private nonisolated extension String {
     var cleanedText: String {
         replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
             .trimmingCharacters(in: .whitespacesAndNewlines)

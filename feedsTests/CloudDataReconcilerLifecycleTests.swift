@@ -6,6 +6,249 @@ import Testing
 @Suite(.serialized)
 @MainActor
 struct CloudDataReconcilerLifecycleTests {
+    @Test func backgroundDetectionDoesNotWriteAndCachesOnlyCleanState() async throws {
+        let fixture = try ReconcilerTestStore()
+        let canonicalID = UUID(
+            uuidString: "00000000-0000-0000-0000-000000000101"
+        )!
+        let duplicateID = UUID(
+            uuidString: "00000000-0000-0000-0000-000000000102"
+        )!
+        let canonical = Feed(
+            id: canonicalID,
+            feedURLString: "https://unit.test/background.xml",
+            title: "Canonical",
+            dateAdded: Date(timeIntervalSince1970: 1),
+            settingsModifiedAt: Date(timeIntervalSince1970: 10)
+        )
+        let duplicate = Feed(
+            id: duplicateID,
+            feedURLString: "https://unit.test/background.xml",
+            title: "Duplicate",
+            dateAdded: Date(timeIntervalSince1970: 2),
+            settingsModifiedAt: Date(timeIntervalSince1970: 20)
+        )
+        let canonicalArticle = Article(
+            id: UUID(
+                uuidString: "00000000-0000-0000-0000-000000000111"
+            )!,
+            articleKey: "\(canonicalID.uuidString)|shared-entry",
+            feedID: canonicalID,
+            feedTitle: canonical.title,
+            title: "Canonical article",
+            isRead: true,
+            readModifiedAt: Date(timeIntervalSince1970: 100)
+        )
+        let duplicateArticle = Article(
+            id: UUID(
+                uuidString: "00000000-0000-0000-0000-000000000112"
+            )!,
+            articleKey: "\(duplicateID.uuidString)|shared-entry",
+            feedID: duplicateID,
+            feedTitle: duplicate.title,
+            title: "Duplicate article",
+            isStarred: true,
+            starredModifiedAt: Date(timeIntervalSince1970: 200)
+        )
+        fixture.context.insert(canonical)
+        fixture.context.insert(duplicate)
+        fixture.context.insert(canonicalArticle)
+        fixture.context.insert(duplicateArticle)
+        try fixture.context.save()
+
+        let detectionContext = ModelContext(fixture.container)
+        detectionContext.autosaveEnabled = false
+        #expect(
+            try CloudDataReconciler.needsReconciliation(
+                in: detectionContext
+            )
+        )
+
+        // Detection mutates only its private context and rolls it back. The
+        // durable store is unchanged until the main actor applies the repair.
+        let preApplyContext = ModelContext(fixture.container)
+        #expect(
+            try preApplyContext.fetch(FetchDescriptor<Feed>()).count == 2
+        )
+        #expect(
+            try preApplyContext.fetch(FetchDescriptor<Article>()).count == 2
+        )
+
+        let controller = CloudDataReconciliationController()
+        try await controller.reconcileIfNeeded(in: fixture.container)
+        #expect(await controller.appliedPassCountForTesting() == 1)
+        try await controller.reconcileIfNeeded(in: fixture.container)
+        #expect(await controller.appliedPassCountForTesting() == 1)
+
+        let firstVerificationContext = ModelContext(fixture.container)
+        firstVerificationContext.autosaveEnabled = false
+        let firstPassFeeds = try firstVerificationContext.fetch(
+            FetchDescriptor<Feed>()
+        )
+        let firstPassArticles = try firstVerificationContext.fetch(
+            FetchDescriptor<Article>()
+        )
+        let firstPassCanonical = try #require(
+            firstPassFeeds.first { $0.id == canonicalID }
+        )
+        let firstPassDuplicate = try #require(
+            firstPassFeeds.first { $0.id == duplicateID }
+        )
+        let mergedArticle = try #require(firstPassArticles.first)
+
+        #expect(firstPassFeeds.count == 2)
+        #expect(firstPassCanonical.isActive)
+        #expect(firstPassCanonical.title == "Duplicate")
+        #expect(firstPassDuplicate.mergedIntoFeedID == canonicalID)
+        #expect(firstPassArticles.count == 1)
+        #expect(mergedArticle.feedID == canonicalID)
+        #expect(
+            mergedArticle.articleKey
+                == "\(canonicalID.uuidString)|shared-entry"
+        )
+        #expect(mergedArticle.isRead)
+        #expect(mergedArticle.isStarred)
+
+        firstPassCanonical.lastError = "Edited after reconciliation"
+        try firstVerificationContext.save()
+
+        try await controller.reconcileIfNeeded(in: fixture.container)
+        #expect(await controller.appliedPassCountForTesting() == 1)
+
+        let secondVerificationContext = ModelContext(fixture.container)
+        let secondPassFeeds = try secondVerificationContext.fetch(
+            FetchDescriptor<Feed>()
+        )
+        let secondPassArticles = try secondVerificationContext.fetch(
+            FetchDescriptor<Article>()
+        )
+        let secondPassCanonical = try #require(
+            secondPassFeeds.first { $0.id == canonicalID }
+        )
+
+        #expect(secondPassFeeds.count == 2)
+        #expect(
+            secondPassCanonical.lastError == "Edited after reconciliation"
+        )
+        #expect(
+            secondPassFeeds.first { $0.id == duplicateID }?.mergedIntoFeedID
+                == canonicalID
+        )
+        #expect(secondPassArticles.count == 1)
+        #expect(secondPassArticles.first?.id == mergedArticle.id)
+        #expect(secondPassArticles.first?.feedID == canonicalID)
+    }
+
+    @Test func concurrentRequestsShareOneMainContextRepair() async throws {
+        let fixture = try ReconcilerTestStore()
+        let canonicalID = UUID(
+            uuidString: "00000000-0000-0000-0000-000000000201"
+        )!
+        let duplicateID = UUID(
+            uuidString: "00000000-0000-0000-0000-000000000202"
+        )!
+        fixture.context.insert(
+            Feed(
+                id: canonicalID,
+                feedURLString: "https://unit.test/single-flight.xml",
+                title: "Canonical",
+                dateAdded: Date(timeIntervalSince1970: 1)
+            )
+        )
+        fixture.context.insert(
+            Feed(
+                id: duplicateID,
+                feedURLString: "https://unit.test/single-flight.xml",
+                title: "Duplicate",
+                dateAdded: Date(timeIntervalSince1970: 2)
+            )
+        )
+        try fixture.context.save()
+
+        let controller = CloudDataReconciliationController()
+        let container = fixture.container
+        try await withThrowingTaskGroup(of: Void.self) { group in
+            for _ in 0..<16 {
+                group.addTask {
+                    try await controller.reconcileIfNeeded(
+                        in: container
+                    )
+                }
+            }
+            try await group.waitForAll()
+        }
+
+        #expect(await controller.appliedPassCountForTesting() == 1)
+        let verificationContext = ModelContext(fixture.container)
+        let feeds = try verificationContext.fetch(FetchDescriptor<Feed>())
+        #expect(feeds.filter(\.isActive).map(\.id) == [canonicalID])
+        #expect(
+            feeds.first { $0.id == duplicateID }?.mergedIntoFeedID
+                == canonicalID
+        )
+    }
+
+    @Test func requestArrivingAfterCleanScanForcesFollowUpDetection() async throws {
+        let fixture = try ReconcilerTestStore()
+        let canonicalID = UUID(
+            uuidString: "00000000-0000-0000-0000-000000000301"
+        )!
+        let duplicateID = UUID(
+            uuidString: "00000000-0000-0000-0000-000000000302"
+        )!
+        let feedURL = "https://unit.test/mid-flight-import.xml"
+        fixture.context.insert(
+            Feed(
+                id: canonicalID,
+                feedURLString: feedURL,
+                title: "Canonical",
+                dateAdded: Date(timeIntervalSince1970: 1)
+            )
+        )
+        try fixture.context.save()
+
+        let gate = ReconciliationSuspensionGate()
+        let controller = CloudDataReconciliationController {
+            await gate.suspend()
+        }
+        let container = fixture.container
+        let initialRequest = Task {
+            try await controller.reconcileIfNeeded(in: container)
+        }
+        await gate.waitUntilSuspended()
+
+        // Simulate a CloudKit import after the first flight's final clean scan
+        // but before that flight is settled by the controller actor.
+        fixture.context.insert(
+            Feed(
+                id: duplicateID,
+                feedURLString: feedURL,
+                title: "Imported duplicate",
+                dateAdded: Date(timeIntervalSince1970: 2)
+            )
+        )
+        try fixture.context.save()
+        let importRequest = Task {
+            try await controller.reconcileIfNeeded(in: container)
+        }
+        while await controller.requestGenerationForTesting() < 2 {
+            await Task.yield()
+        }
+        await gate.resume()
+
+        try await initialRequest.value
+        try await importRequest.value
+        #expect(await controller.appliedPassCountForTesting() == 1)
+
+        let verificationContext = ModelContext(container)
+        let feeds = try verificationContext.fetch(FetchDescriptor<Feed>())
+        #expect(feeds.filter(\.isActive).map(\.id) == [canonicalID])
+        #expect(
+            feeds.first { $0.id == duplicateID }?.mergedIntoFeedID
+                == canonicalID
+        )
+    }
+
     @Test func duplicateFeedRedirectsCurrentAndLateArticles() throws {
         let fixture = try ReconcilerTestStore()
         let canonicalID = UUID(
@@ -233,6 +476,36 @@ struct CloudDataReconcilerLifecycleTests {
             feedTitle: feed.title,
             title: remoteID
         )
+    }
+}
+
+private actor ReconciliationSuspensionGate {
+    private var isSuspended = false
+    private var isReleased = false
+    private var arrivalContinuation: CheckedContinuation<Void, Never>?
+    private var releaseContinuation: CheckedContinuation<Void, Never>?
+
+    func suspend() async {
+        isSuspended = true
+        arrivalContinuation?.resume()
+        arrivalContinuation = nil
+        guard !isReleased else { return }
+        await withCheckedContinuation { continuation in
+            releaseContinuation = continuation
+        }
+    }
+
+    func waitUntilSuspended() async {
+        guard !isSuspended else { return }
+        await withCheckedContinuation { continuation in
+            arrivalContinuation = continuation
+        }
+    }
+
+    func resume() {
+        isReleased = true
+        releaseContinuation?.resume()
+        releaseContinuation = nil
     }
 }
 

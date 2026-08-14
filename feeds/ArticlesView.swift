@@ -7,11 +7,11 @@ struct FeedArticlesView: View {
 
     @Environment(\.modelContext) private var modelContext
     @Environment(\.feedsModelContainer) private var modelContainer
-    @Query(sort: \Article.publishedAt, order: .reverse) private var articles: [Article]
     @Query(sort: \Feed.dateAdded) private var allFeeds: [Feed]
     @AppStorage(AppPreferences.hidesReadArticles)
     private var hidesReadArticles = false
     @State private var searchText = ""
+    @State private var debouncedSearchText = ""
     @State private var refreshError: String?
     @State private var persistenceError: String?
 
@@ -23,6 +23,19 @@ struct FeedArticlesView: View {
         Set(feeds.map(\.id))
     }
 
+    private var articleFeedIDs: [UUID] {
+        guard let selection else { return [] }
+
+        switch selection {
+        case .all:
+            return activeFeedIDs.sorted {
+                $0.uuidString < $1.uuidString
+            }
+        case .feed(let feedID):
+            return activeFeedIDs.contains(feedID) ? [feedID] : []
+        }
+    }
+
     private var selectedFeed: Feed? {
         guard case .feed(let feedID)? = selection else { return nil }
         return feeds.first { $0.id == feedID }
@@ -30,23 +43,6 @@ struct FeedArticlesView: View {
 
     private var showsAllArticles: Bool {
         selection == .all
-    }
-
-    private var visibleArticles: [Article] {
-        guard selection != nil else { return [] }
-        return articles.filter { article in
-            guard activeFeedIDs.contains(article.feedID) else { return false }
-            let matchesFeed = showsAllArticles || article.feedID == selectedFeed?.id
-            let matchesFilter =
-                !hidesReadArticles
-                || !article.isRead
-                || article.articleKey == selectedArticleKey
-            let matchesSearch =
-                searchText.isEmpty
-                || article.title.localizedStandardContains(searchText)
-                || article.summaryText.localizedStandardContains(searchText)
-            return matchesFeed && matchesFilter && matchesSearch
-        }
     }
 
     var body: some View {
@@ -57,59 +53,43 @@ struct FeedArticlesView: View {
                     systemImage: "dot.radiowaves.left.and.right",
                     description: Text("Articles from the selected feed appear here.")
                 )
-            } else if visibleArticles.isEmpty {
-                ContentUnavailableView {
-                    Label(emptyTitle, systemImage: "newspaper")
-                } description: {
-                    Text(emptyDescription)
-                }
             } else {
-                List(selection: $selectedArticleKey) {
-                    ForEach(visibleArticles) { article in
-                        NavigationLink(value: article.articleKey) {
-                            ArticleRow(article: article)
-                        }
-                        .accessibilityIdentifier(
-                            "articleRow.\(article.articleKey)"
-                        )
-                        .navigationLinkIndicatorVisibility(.hidden)
-                        .tag(article.articleKey)
-                        .swipeActions(edge: .leading, allowsFullSwipe: true) {
-                            Button {
-                                updateReadState(for: article)
-                            } label: {
-                                Label(
-                                    article.isRead ? "Mark as Unread" : "Mark as Read",
-                                    systemImage: article.isRead
-                                        ? "circle" : "checkmark.circle"
-                                )
-                            }
-                            .tint(.blue)
-                        }
-                        .swipeActions(edge: .trailing) {
-                            Button {
-                                updateStarredState(for: article)
-                            } label: {
-                                Label(
-                                    article.isStarred ? "Remove Favorite" : "Favorite",
-                                    systemImage: article.isStarred
-                                        ? "star.slash" : "star"
-                                )
-                            }
-                            .tint(.orange)
-                        }
-                    }
-                }
-                #if os(iOS)
-                    .listRowSpacing(12)
-                    .listStyle(.insetGrouped)
-                #else
-                    .listStyle(.inset)
-                #endif
+                ArticleQueryResultsView(
+                    feedIDs: articleFeedIDs,
+                    hidesReadArticles: hidesReadArticles,
+                    selectedArticleKey: $selectedArticleKey,
+                    searchText: debouncedSearchText,
+                    emptyTitle: emptyTitle,
+                    emptyDescription: emptyDescription,
+                    onUpdateRead: { updateReadState(for: $0) },
+                    onUpdateStarred: { updateStarredState(for: $0) }
+                )
+                .id(
+                    ArticleQueryScope(
+                        feedIDs: articleFeedIDs,
+                        hidesReadArticles: hidesReadArticles,
+                        searchText: debouncedSearchText
+                    )
+                )
             }
         }
         .navigationTitle(showsAllArticles ? "All" : selectedFeed?.title ?? "Articles")
         .searchable(text: $searchText, prompt: "Search Articles")
+        .task(id: searchText) {
+            if searchText.isEmpty {
+                debouncedSearchText = ""
+                return
+            }
+            do {
+                try await Task.sleep(for: .milliseconds(200))
+                try Task.checkCancellation()
+                debouncedSearchText = searchText
+            } catch is CancellationError {
+                return
+            } catch {
+                return
+            }
+        }
         .refreshable { await refreshSelectedFeed() }
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
@@ -227,6 +207,220 @@ struct FeedArticlesView: View {
         } catch {
             refreshError = error.localizedDescription
         }
+    }
+}
+
+private struct ArticleQueryResultsView: View {
+    private static let pageSize = 100
+
+    @Binding private var selectedArticleKey: String?
+    @State private var pageLimit: Int
+
+    let feedIDs: [UUID]
+    let hidesReadArticles: Bool
+    let searchText: String
+    let emptyTitle: String
+    let emptyDescription: String
+    let onUpdateRead: (Article) -> Void
+    let onUpdateStarred: (Article) -> Void
+
+    init(
+        feedIDs: [UUID],
+        hidesReadArticles: Bool,
+        selectedArticleKey: Binding<String?>,
+        searchText: String,
+        emptyTitle: String,
+        emptyDescription: String,
+        onUpdateRead: @escaping (Article) -> Void,
+        onUpdateStarred: @escaping (Article) -> Void
+    ) {
+        _selectedArticleKey = selectedArticleKey
+        _pageLimit = State(initialValue: Self.pageSize)
+        self.feedIDs = feedIDs
+        self.hidesReadArticles = hidesReadArticles
+        self.searchText = searchText
+        self.emptyTitle = emptyTitle
+        self.emptyDescription = emptyDescription
+        self.onUpdateRead = onUpdateRead
+        self.onUpdateStarred = onUpdateStarred
+    }
+
+    var body: some View {
+        ArticlePageResultsView(
+            feedIDs: feedIDs,
+            hidesReadArticles: hidesReadArticles,
+            selectedArticleKey: $selectedArticleKey,
+            searchText: searchText,
+            fetchLimit: pageLimit,
+            emptyTitle: emptyTitle,
+            emptyDescription: emptyDescription,
+            onUpdateRead: onUpdateRead,
+            onUpdateStarred: onUpdateStarred,
+            onLoadMore: {
+                pageLimit += Self.pageSize
+            }
+        )
+    }
+}
+
+private struct ArticleQueryScope: Hashable {
+    let feedIDs: [UUID]
+    let hidesReadArticles: Bool
+    let searchText: String
+}
+
+private struct ArticlePageResultsView: View {
+    @Binding private var selectedArticleKey: String?
+    @Query private var articles: [Article]
+    @Query private var selectedArticles: [Article]
+
+    let fetchLimit: Int
+    let searchText: String
+    let emptyTitle: String
+    let emptyDescription: String
+    let onUpdateRead: (Article) -> Void
+    let onUpdateStarred: (Article) -> Void
+    let onLoadMore: () -> Void
+
+    init(
+        feedIDs: [UUID],
+        hidesReadArticles: Bool,
+        selectedArticleKey: Binding<String?>,
+        searchText: String,
+        fetchLimit: Int,
+        emptyTitle: String,
+        emptyDescription: String,
+        onUpdateRead: @escaping (Article) -> Void,
+        onUpdateStarred: @escaping (Article) -> Void,
+        onLoadMore: @escaping () -> Void
+    ) {
+        _selectedArticleKey = selectedArticleKey
+        _articles = Query(
+            FeedPersistenceQueries.articlePage(
+                feedIDs: feedIDs,
+                hidesReadArticles: hidesReadArticles,
+                // The selected article is pinned by the scoped query below.
+                // Keeping it out of the page prevents a hidden read article
+                // from displacing an unread result at the fetch boundary.
+                selectedArticleKey: nil,
+                searchText: searchText,
+                fetchLimit: fetchLimit
+            )
+        )
+
+        let selectedKey = selectedArticleKey.wrappedValue
+        _selectedArticles = Query(
+            FeedPersistenceQueries.articles(
+                articleKey: selectedKey ?? "",
+                feedIDs: selectedKey == nil ? [] : feedIDs
+            )
+        )
+        self.fetchLimit = fetchLimit
+        self.searchText = searchText
+        self.emptyTitle = emptyTitle
+        self.emptyDescription = emptyDescription
+        self.onUpdateRead = onUpdateRead
+        self.onUpdateStarred = onUpdateStarred
+        self.onLoadMore = onLoadMore
+    }
+
+    private var selectedArticleOutsidePage: Article? {
+        selectedArticles.first { selectedArticle in
+            let matchesSearch = searchText.isEmpty
+                || selectedArticle.title.localizedStandardContains(searchText)
+                || selectedArticle.summaryText.localizedStandardContains(
+                    searchText
+                )
+            return matchesSearch && !articles.contains {
+                $0.persistentModelID == selectedArticle.persistentModelID
+            }
+        }
+    }
+
+    var body: some View {
+        if articles.isEmpty {
+            if let selectedArticleOutsidePage {
+                List(selection: $selectedArticleKey) {
+                    articleLink(selectedArticleOutsidePage)
+                }
+                .articleListStyle()
+            } else {
+                ContentUnavailableView {
+                    Label(emptyTitle, systemImage: "newspaper")
+                } description: {
+                    Text(emptyDescription)
+                }
+            }
+        } else {
+            List(selection: $selectedArticleKey) {
+                if let selectedArticleOutsidePage {
+                    Section("Selected") {
+                        articleLink(selectedArticleOutsidePage)
+                    }
+                }
+
+                ForEach(articles) { article in
+                    articleLink(article)
+                }
+
+                if articles.count == fetchLimit {
+                    ProgressView()
+                        .frame(maxWidth: .infinity)
+                        .listRowSeparator(.hidden)
+                        .task {
+                            onLoadMore()
+                        }
+                }
+            }
+            .articleListStyle()
+        }
+    }
+
+    private func articleLink(_ article: Article) -> some View {
+        NavigationLink(value: article.articleKey) {
+            ArticleRow(article: article)
+        }
+        .accessibilityIdentifier(
+            "articleRow.\(article.articleKey)"
+        )
+        .navigationLinkIndicatorVisibility(.hidden)
+        .tag(article.articleKey)
+        .swipeActions(edge: .leading, allowsFullSwipe: true) {
+            Button {
+                onUpdateRead(article)
+            } label: {
+                Label(
+                    article.isRead ? "Mark as Unread" : "Mark as Read",
+                    systemImage: article.isRead
+                        ? "circle" : "checkmark.circle"
+                )
+            }
+            .tint(.blue)
+        }
+        .swipeActions(edge: .trailing) {
+            Button {
+                onUpdateStarred(article)
+            } label: {
+                Label(
+                    article.isStarred ? "Remove Favorite" : "Favorite",
+                    systemImage: article.isStarred
+                        ? "star.slash" : "star"
+                )
+            }
+            .tint(.orange)
+        }
+    }
+}
+
+private extension View {
+    @ViewBuilder
+    func articleListStyle() -> some View {
+        #if os(iOS)
+            listRowSpacing(12)
+                .listStyle(.insetGrouped)
+        #else
+            listStyle(.inset)
+        #endif
     }
 }
 

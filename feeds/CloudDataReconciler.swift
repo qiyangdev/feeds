@@ -1,21 +1,36 @@
 import Foundation
 import SwiftData
 
-@MainActor
-enum CloudDataReconciler {
+nonisolated enum CloudDataReconciler {
     static func reconcile(in modelContext: ModelContext) throws {
         try PersistenceService.save(in: modelContext) {
-            let feeds = try modelContext.fetch(FetchDescriptor<Feed>())
-            reconcileFeeds(feeds)
-
-            let articles = try modelContext.fetch(FetchDescriptor<Article>())
-            repairDuplicateArticleIDs(articles)
-            reconcileArticles(
-                articles,
-                feeds: feeds,
-                modelContext: modelContext
-            )
+            try applyChanges(in: modelContext)
         }
+    }
+
+    static func needsReconciliation(
+        in modelContext: ModelContext
+    ) throws -> Bool {
+        modelContext.autosaveEnabled = false
+        defer { modelContext.rollback() }
+        let snapshotBefore = try CloudDataDryRunSnapshot(in: modelContext)
+        try applyChanges(in: modelContext)
+        let snapshotAfter = try CloudDataDryRunSnapshot(in: modelContext)
+        return snapshotBefore != snapshotAfter
+    }
+
+    private static func applyChanges(
+        in modelContext: ModelContext
+    ) throws {
+        let feeds = try modelContext.fetch(FetchDescriptor<Feed>())
+        let articles = try modelContext.fetch(FetchDescriptor<Article>())
+        repairDuplicateArticleIDs(articles)
+        reconcileFeeds(feeds)
+        reconcileArticles(
+            articles,
+            feeds: feeds,
+            modelContext: modelContext
+        )
     }
 
     private static func repairDuplicateArticleIDs(_ articles: [Article]) {
@@ -68,10 +83,14 @@ enum CloudDataReconciler {
                 .sorted(by: feedPrecedes)
             guard let canonical = activeFeeds.first else { continue }
 
-            canonical.mergedIntoFeedID = nil
+            if canonical.mergedIntoFeedID != nil {
+                canonical.mergedIntoFeedID = nil
+            }
             for duplicate in activeFeeds.dropFirst() {
                 merge(duplicate, into: canonical)
-                duplicate.mergedIntoFeedID = canonical.id
+                if duplicate.mergedIntoFeedID != canonical.id {
+                    duplicate.mergedIntoFeedID = canonical.id
+                }
             }
         }
     }
@@ -109,12 +128,19 @@ enum CloudDataReconciler {
                     from: article.articleKey,
                     fallback: article.urlString ?? article.title
                 )
-                article.feedID = destination.id
-                article.feedTitle = destination.title
-                article.articleKey = articleKey(
+                let destinationArticleKey = articleKey(
                     feedID: destination.id,
                     remoteID: remoteID
                 )
+                if article.feedID != destination.id {
+                    article.feedID = destination.id
+                }
+                if article.feedTitle != destination.title {
+                    article.feedTitle = destination.title
+                }
+                if article.articleKey != destinationArticleKey {
+                    article.articleKey = destinationArticleKey
+                }
                 activeArticles.append(article)
 
             case .deleted:
@@ -148,20 +174,38 @@ enum CloudDataReconciler {
             duplicateID: duplicate.id,
             canonicalID: canonical.id
         ) {
-            canonical.title = duplicate.title
-            canonical.automaticallyExtractsArticleContent =
-                duplicate.automaticallyExtractsArticleContent
-            canonical.settingsModifiedAt = duplicate.settingsModifiedAt
+            if canonical.title != duplicate.title {
+                canonical.title = duplicate.title
+            }
+            if canonical.automaticallyExtractsArticleContent
+                != duplicate.automaticallyExtractsArticleContent
+            {
+                canonical.automaticallyExtractsArticleContent =
+                    duplicate.automaticallyExtractsArticleContent
+            }
+            if canonical.settingsModifiedAt != duplicate.settingsModifiedAt {
+                canonical.settingsModifiedAt = duplicate.settingsModifiedAt
+            }
         }
 
         if let duplicateLastFetchedAt = duplicate.lastFetchedAt,
             canonical.lastFetchedAt == nil
                 || duplicateLastFetchedAt > canonical.lastFetchedAt!
         {
-            canonical.siteURLString = duplicate.siteURLString
-            canonical.summaryText = duplicate.summaryText
-            canonical.iconData = duplicate.iconData ?? canonical.iconData
-            canonical.lastError = duplicate.lastError
+            if canonical.siteURLString != duplicate.siteURLString {
+                canonical.siteURLString = duplicate.siteURLString
+            }
+            if canonical.summaryText != duplicate.summaryText {
+                canonical.summaryText = duplicate.summaryText
+            }
+            if let duplicateIconData = duplicate.iconData,
+                canonical.iconData != duplicateIconData
+            {
+                canonical.iconData = duplicateIconData
+            }
+            if canonical.lastError != duplicate.lastError {
+                canonical.lastError = duplicate.lastError
+            }
         } else {
             if canonical.siteURLString == nil {
                 canonical.siteURLString = duplicate.siteURLString
@@ -177,9 +221,15 @@ enum CloudDataReconciler {
             }
         }
 
-        canonical.lastFetchedAt = [canonical.lastFetchedAt, duplicate.lastFetchedAt]
+        let mergedLastFetchedAt = [
+            canonical.lastFetchedAt,
+            duplicate.lastFetchedAt,
+        ]
             .compactMap { $0 }
             .max()
+        if canonical.lastFetchedAt != mergedLastFetchedAt {
+            canonical.lastFetchedAt = mergedLastFetchedAt
+        }
     }
 
     private static func merge(_ duplicate: Article, into canonical: Article) {
@@ -189,8 +239,12 @@ enum CloudDataReconciler {
             duplicateID: duplicate.id,
             canonicalID: canonical.id
         ) {
-            canonical.isRead = duplicate.isRead
-            canonical.readModifiedAt = duplicate.readModifiedAt
+            if canonical.isRead != duplicate.isRead {
+                canonical.isRead = duplicate.isRead
+            }
+            if canonical.readModifiedAt != duplicate.readModifiedAt {
+                canonical.readModifiedAt = duplicate.readModifiedAt
+            }
         }
         if fieldFromDuplicateWins(
             duplicateDate: duplicate.starredModifiedAt,
@@ -198,8 +252,12 @@ enum CloudDataReconciler {
             duplicateID: duplicate.id,
             canonicalID: canonical.id
         ) {
-            canonical.isStarred = duplicate.isStarred
-            canonical.starredModifiedAt = duplicate.starredModifiedAt
+            if canonical.isStarred != duplicate.isStarred {
+                canonical.isStarred = duplicate.isStarred
+            }
+            if canonical.starredModifiedAt != duplicate.starredModifiedAt {
+                canonical.starredModifiedAt = duplicate.starredModifiedAt
+            }
         }
         if fieldFromDuplicateWins(
             duplicateDate: duplicate.extractedModifiedAt,
@@ -207,20 +265,38 @@ enum CloudDataReconciler {
             duplicateID: duplicate.id,
             canonicalID: canonical.id
         ) {
-            canonical.extractedMarkdown = duplicate.extractedMarkdown
-            canonical.extractedModifiedAt = duplicate.extractedModifiedAt
+            if canonical.extractedMarkdown != duplicate.extractedMarkdown {
+                canonical.extractedMarkdown = duplicate.extractedMarkdown
+            }
+            if canonical.extractedModifiedAt
+                != duplicate.extractedModifiedAt
+            {
+                canonical.extractedModifiedAt = duplicate.extractedModifiedAt
+            }
         }
 
         if serverStateFromDuplicateWins(
             duplicate: duplicate,
             canonical: canonical
         ) {
-            canonical.feedTitle = duplicate.feedTitle
-            canonical.title = duplicate.title
-            canonical.urlString = duplicate.urlString
-            canonical.summaryText = duplicate.summaryText
-            canonical.author = duplicate.author
-            canonical.publishedAt = duplicate.publishedAt
+            if canonical.feedTitle != duplicate.feedTitle {
+                canonical.feedTitle = duplicate.feedTitle
+            }
+            if canonical.title != duplicate.title {
+                canonical.title = duplicate.title
+            }
+            if canonical.urlString != duplicate.urlString {
+                canonical.urlString = duplicate.urlString
+            }
+            if canonical.summaryText != duplicate.summaryText {
+                canonical.summaryText = duplicate.summaryText
+            }
+            if canonical.author != duplicate.author {
+                canonical.author = duplicate.author
+            }
+            if canonical.publishedAt != duplicate.publishedAt {
+                canonical.publishedAt = duplicate.publishedAt
+            }
         } else {
             if canonical.title.isEmpty { canonical.title = duplicate.title }
             if canonical.urlString == nil {
@@ -294,16 +370,22 @@ enum CloudDataReconciler {
                     .sorted(by: feedPrecedes)
                 guard let canonical = cycle.first else { return .deleted }
 
-                canonical.mergedIntoFeedID = nil
+                if canonical.mergedIntoFeedID != nil {
+                    canonical.mergedIntoFeedID = nil
+                }
                 for feed in cycle.dropFirst() {
-                    feed.mergedIntoFeedID = canonical.id
+                    if feed.mergedIntoFeedID != canonical.id {
+                        feed.mergedIntoFeedID = canonical.id
+                    }
                 }
                 return .active(canonical)
             }
 
             guard let destinationID = current.mergedIntoFeedID else {
                 for visitedID in visitedIDs where visitedID != current.id {
-                    feedByID[visitedID]?.mergedIntoFeedID = current.id
+                    if feedByID[visitedID]?.mergedIntoFeedID != current.id {
+                        feedByID[visitedID]?.mergedIntoFeedID = current.id
+                    }
                 }
                 return .active(current)
             }
@@ -348,5 +430,91 @@ enum CloudDataReconciler {
 
     private static func articleKey(feedID: UUID, remoteID: String) -> String {
         "\(feedID.uuidString)|\(remoteID)"
+    }
+}
+
+private nonisolated struct CloudDataDryRunSnapshot: Equatable, Sendable {
+    private struct FeedRecord: Hashable, Sendable {
+        let persistentID: PersistentIdentifier
+        let id: UUID
+        let feedURLString: String
+        let title: String
+        let siteURLString: String?
+        let summaryText: String
+        let dateAdded: Date
+        let lastFetchedAt: Date?
+        let lastError: String?
+        let iconData: Data?
+        let automaticallyExtractsArticleContent: Bool
+        let settingsModifiedAt: Date
+        let deletedAt: Date?
+        let mergedIntoFeedID: UUID?
+    }
+
+    private struct ArticleRecord: Hashable, Sendable {
+        let persistentID: PersistentIdentifier
+        let id: UUID
+        let articleKey: String
+        let feedID: UUID
+        let feedTitle: String
+        let title: String
+        let urlString: String?
+        let summaryText: String
+        let author: String?
+        let publishedAt: Date
+        let savedAt: Date
+        let isRead: Bool
+        let isStarred: Bool
+        let extractedMarkdown: String?
+        let readModifiedAt: Date
+        let starredModifiedAt: Date
+        let extractedModifiedAt: Date
+    }
+
+    private let feeds: [FeedRecord]
+    private let articles: [ArticleRecord]
+
+    init(in modelContext: ModelContext) throws {
+        feeds = try modelContext.fetch(FetchDescriptor<Feed>()).map {
+            FeedRecord(
+                persistentID: $0.persistentModelID,
+                id: $0.id,
+                feedURLString: $0.feedURLString,
+                title: $0.title,
+                siteURLString: $0.siteURLString,
+                summaryText: $0.summaryText,
+                dateAdded: $0.dateAdded,
+                lastFetchedAt: $0.lastFetchedAt,
+                lastError: $0.lastError,
+                iconData: $0.iconData,
+                automaticallyExtractsArticleContent:
+                    $0.automaticallyExtractsArticleContent,
+                settingsModifiedAt: $0.settingsModifiedAt,
+                deletedAt: $0.deletedAt,
+                mergedIntoFeedID: $0.mergedIntoFeedID
+            )
+        }.sorted { $0.persistentID < $1.persistentID }
+        articles = try modelContext.fetch(FetchDescriptor<Article>()).compactMap {
+            guard !$0.isDeleted else { return nil }
+            return ArticleRecord(
+                persistentID: $0.persistentModelID,
+                id: $0.id,
+                articleKey: $0.articleKey,
+                feedID: $0.feedID,
+                feedTitle: $0.feedTitle,
+                title: $0.title,
+                urlString: $0.urlString,
+                summaryText: $0.summaryText,
+                author: $0.author,
+                publishedAt: $0.publishedAt,
+                savedAt: $0.savedAt,
+                isRead: $0.isRead,
+                isStarred: $0.isStarred,
+                extractedMarkdown: $0.extractedMarkdown,
+                readModifiedAt: $0.readModifiedAt,
+                starredModifiedAt: $0.starredModifiedAt,
+                extractedModifiedAt: $0.extractedModifiedAt
+            )
+        }.sorted { $0.persistentID < $1.persistentID }
     }
 }

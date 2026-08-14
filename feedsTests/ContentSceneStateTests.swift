@@ -192,6 +192,46 @@ struct ContentSceneStateTests {
         assertResolved(resolution, is: expectedArticle)
     }
 
+    @Test func legacyArticleIDFallbackDoesNotCrossFeeds() {
+        let expectedFeed = makeFeed(
+            id: UUID(
+                uuidString: "00000000-0000-0000-0000-000000000056"
+            )!
+        )
+        let otherFeed = makeFeed(
+            id: UUID(
+                uuidString: "00000000-0000-0000-0000-000000000057"
+            )!
+        )
+        let duplicatedLegacyID = UUID(
+            uuidString: "00000000-0000-0000-0000-000000000058"
+        )!
+        let wrongFeedArticle = makeArticle(
+            id: duplicatedLegacyID,
+            feed: otherFeed,
+            remoteID: "other-feed-entry"
+        )
+        let reference = StoredArticleReference(
+            id: duplicatedLegacyID,
+            key: "\(expectedFeed.id.uuidString)|missing-entry",
+            feedID: expectedFeed.id
+        )
+
+        let resolution = ContentSceneResolver.resolveArticle(
+            reference,
+            subscription: .all,
+            feeds: [expectedFeed, otherFeed],
+            articles: [wrongFeedArticle]
+        )
+
+        guard case .pending = resolution else {
+            Issue.record(
+                "A legacy article ID from another feed must not satisfy restoration."
+            )
+            return
+        }
+    }
+
     @Test func articleResolvesByRemoteIDAfterFeedRedirect() {
         let canonical = makeFeed(
             id: UUID(

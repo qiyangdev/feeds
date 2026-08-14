@@ -182,10 +182,11 @@ enum FeedSyncService {
         let replacement: (parsed: ParsedFeed, iconData: Data?)?
 
         if urlChanged {
-            let allFeeds = try modelContext.fetch(FetchDescriptor<Feed>())
-            guard !allFeeds.contains(where: {
+            let activeFeeds = try modelContext.fetch(
+                FeedPersistenceQueries.activeFeeds()
+            )
+            guard !activeFeeds.contains(where: {
                 guard $0.id != feed.id,
-                    $0.isActive,
                     let candidateURL = URL(string: $0.feedURLString)
                 else {
                     return false
@@ -208,17 +209,18 @@ enum FeedSyncService {
         let operationDate = Date.now
         var updatedFeed = feed
         try PersistenceService.save(in: modelContext) {
-            let allFeeds = try modelContext.fetch(FetchDescriptor<Feed>())
-            guard let currentFeed = allFeeds.first(where: {
-                $0.id == feed.id && $0.isActive
+            let activeFeeds = try modelContext.fetch(
+                FeedPersistenceQueries.activeFeeds()
+            )
+            guard let currentFeed = activeFeeds.first(where: {
+                $0.id == feed.id
             }) else {
                 throw FeedSyncError.feedNoLongerActive
             }
 
             if let replacement {
-                let hasDuplicate = allFeeds.contains { candidate in
+                let hasDuplicate = activeFeeds.contains { candidate in
                     guard candidate.id != currentFeed.id,
-                        candidate.isActive,
                         let candidateURL = candidate.feedURL
                     else {
                         return false
@@ -251,9 +253,9 @@ enum FeedSyncService {
 
                 currentFeed.deletedAt = operationDate
                 let oldArticles = try modelContext.fetch(
-                    FetchDescriptor<Article>()
+                    FeedPersistenceQueries.articles(feedID: currentFeed.id)
                 )
-                for article in oldArticles where article.feedID == currentFeed.id {
+                for article in oldArticles {
                     modelContext.delete(article)
                 }
                 updatedFeed = newFeed
@@ -263,11 +265,9 @@ enum FeedSyncService {
                     automaticallyExtractsArticleContent
                 currentFeed.settingsModifiedAt = operationDate
                 let currentArticles = try modelContext.fetch(
-                    FetchDescriptor<Article>()
+                    FeedPersistenceQueries.articles(feedID: currentFeed.id)
                 )
-                for article in currentArticles
-                where article.feedID == currentFeed.id
-                {
+                for article in currentArticles {
                     article.feedTitle = trimmedTitle
                 }
                 updatedFeed = currentFeed
@@ -278,15 +278,19 @@ enum FeedSyncService {
 
     static func delete(_ feed: Feed, modelContext: ModelContext) throws {
         try PersistenceService.save(in: modelContext) {
-            let feeds = try modelContext.fetch(FetchDescriptor<Feed>())
+            let feeds = try modelContext.fetch(
+                FeedPersistenceQueries.feeds(id: feed.id)
+            )
             guard let currentFeed = feeds.first(where: {
                 $0.id == feed.id && $0.isActive
             }) else {
                 return
             }
             currentFeed.deletedAt = .now
-            let articles = try modelContext.fetch(FetchDescriptor<Article>())
-            for article in articles where article.feedID == currentFeed.id {
+            let articles = try modelContext.fetch(
+                FeedPersistenceQueries.articles(feedID: currentFeed.id)
+            )
+            for article in articles {
                 modelContext.delete(article)
             }
         }
@@ -337,6 +341,7 @@ enum FeedSyncService {
         }
     }
 
+    @concurrent
     private static func fetch(url: URL) async throws -> ParsedFeed {
         var request = URLRequest(url: url)
         request.timeoutInterval = 20
@@ -359,8 +364,9 @@ enum FeedSyncService {
         let context = ModelContext(modelContainer)
         context.autosaveEnabled = false
         try PersistenceService.save(in: context) {
-            let articles = try context.fetch(FetchDescriptor<Article>())
-            let matchingArticles = articles.filter { $0.id == id }
+            let matchingArticles = try context.fetch(
+                FeedPersistenceQueries.articles(id: id)
+            )
             guard matchingArticles.count == 1,
                 let article = matchingArticles.first
             else {
@@ -380,10 +386,30 @@ enum FeedSyncService {
         feed.lastFetchedAt = .now
         feed.lastError = nil
 
-        let allArticles = try modelContext.fetch(FetchDescriptor<Article>())
-        let feedArticles = allArticles
-            .filter { $0.feedID == feed.id }
-            .sorted { $0.id.uuidString < $1.id.uuidString }
+        let incomingArticleKeys = Array(
+            Set(parsed.entries.map { entry in
+                "\(feed.id.uuidString)|\(entry.id)"
+            })
+        ).sorted()
+        var feedArticles: [Article] = []
+        // Keep each SQL `IN` clause bounded for unusually large feeds while
+        // fetching only records represented by the current response.
+        for startIndex in stride(
+            from: 0,
+            to: incomingArticleKeys.count,
+            by: 500
+        ) {
+            let endIndex = min(startIndex + 500, incomingArticleKeys.count)
+            feedArticles += try modelContext.fetch(
+                FeedPersistenceQueries.articles(
+                    feedID: feed.id,
+                    articleKeys: Array(
+                        incomingArticleKeys[startIndex..<endIndex]
+                    )
+                )
+            )
+        }
+        feedArticles.sort { $0.id.uuidString < $1.id.uuidString }
         var existingByKey: [String: Article] = [:]
         for article in feedArticles {
             if let canonical = existingByKey[article.articleKey] {
@@ -426,8 +452,7 @@ enum FeedSyncService {
         matching normalizedURLString: String,
         modelContext: ModelContext
     ) throws -> Feed? {
-        try modelContext.fetch(FetchDescriptor<Feed>())
-            .filter(\.isActive)
+        try modelContext.fetch(FeedPersistenceQueries.activeFeeds())
             .filter { feed in
                 guard let url = feed.feedURL else { return false }
                 return normalizedFeedURLString(url) == normalizedURLString
@@ -446,7 +471,9 @@ enum FeedSyncService {
         expectedURLString: String,
         modelContext: ModelContext
     ) throws -> Feed? {
-        try modelContext.fetch(FetchDescriptor<Feed>()).first { feed in
+        try modelContext.fetch(
+            FeedPersistenceQueries.feeds(id: id)
+        ).first { feed in
             guard feed.id == id,
                 feed.isActive,
                 let currentURL = feed.feedURL

@@ -1,3 +1,6 @@
+import Combine
+import CoreData
+import OSLog
 import SwiftData
 import SwiftUI
 
@@ -21,14 +24,26 @@ private enum SubscriptionSheet: Identifiable {
     }
 }
 
+private let subscriptionCountLogger = Logger(
+    subsystem: "dev.qiyang.feeds",
+    category: "SubscriptionCounts"
+)
+
+private struct SubscriptionCountRequest: Hashable {
+    let feedIDs: [UUID]
+    let revision: Int
+}
+
 struct SubscriptionsView: View {
     @Binding var selection: SubscriptionSelection?
 
     @Environment(\.modelContext) private var modelContext
     @Query(sort: \Feed.dateAdded) private var allFeeds: [Feed]
-    @Query private var articles: [Article]
     @State private var presentedSheet: SubscriptionSheet?
     @State private var errorMessage: String?
+    @State private var articleCounts = SubscriptionArticleCounts.empty
+    @State private var countRevision = 0
+    @State private var countController = SubscriptionArticleCountController()
     @SceneStorage(SceneStorageKeys.iCloudSectionExpanded)
     private var isICloudExpanded = true
 
@@ -40,8 +55,13 @@ struct SubscriptionsView: View {
         Set(feeds.map(\.id))
     }
 
-    private var activeArticles: [Article] {
-        articles.filter { activeFeedIDs.contains($0.feedID) }
+    private var countRequest: SubscriptionCountRequest {
+        SubscriptionCountRequest(
+            feedIDs: activeFeedIDs.sorted {
+                $0.uuidString < $1.uuidString
+            },
+            revision: countRevision
+        )
     }
 
     var body: some View {
@@ -61,8 +81,10 @@ struct SubscriptionsView: View {
                     Section {
                         NavigationLink(value: SubscriptionSelection.all) {
                             Label("All", systemImage: "tray.full")
-                                .badge(activeArticles.count)
-                                .accessibilityValue(articleCountDescription)
+                                .badge(articleCounts.total)
+                                .accessibilityValue(
+                                    articleCountDescription(articleCounts.total)
+                                )
                         }
                         .tag(SubscriptionSelection.all)
                         .accessibilityIdentifier("allArticlesRow")
@@ -70,7 +92,9 @@ struct SubscriptionsView: View {
 
                     Section("iCloud", isExpanded: $isICloudExpanded) {
                         ForEach(feeds) { feed in
-                            let unreadCount = unreadCount(for: feed)
+                            let unreadCount = articleCounts.unreadCount(
+                                for: feed.id
+                            )
                             NavigationLink(
                                 value: SubscriptionSelection.feed(feed.id)
                             ) {
@@ -126,6 +150,47 @@ struct SubscriptionsView: View {
             }
         }
         .navigationTitle("Feeds")
+        .onReceive(
+            NotificationCenter.default.publisher(for: ModelContext.didSave)
+                .receive(on: DispatchQueue.main)
+        ) { _ in
+            countRevision &+= 1
+        }
+        .onReceive(
+            NotificationCenter.default.publisher(
+                for: NSPersistentCloudKitContainer.eventChangedNotification
+            )
+            .receive(on: DispatchQueue.main)
+        ) { notification in
+            guard let event = notification.userInfo?[
+                NSPersistentCloudKitContainer.eventNotificationUserInfoKey
+            ] as? NSPersistentCloudKitContainer.Event,
+                event.type == .import,
+                event.endDate != nil,
+                event.succeeded
+            else {
+                return
+            }
+            countRevision &+= 1
+        }
+        .task(id: countRequest) {
+            let modelContainer = modelContext.container
+            do {
+                try await Task.sleep(for: .milliseconds(100))
+                try Task.checkCancellation()
+                let counts = try await countController.counts(
+                    in: modelContainer,
+                    activeFeedIDs: countRequest.feedIDs
+                )
+                try Task.checkCancellation()
+                articleCounts = counts
+            } catch {
+                guard !(error is CancellationError) else { return }
+                subscriptionCountLogger.error(
+                    "Unable to update subscription counts: \(error.localizedDescription, privacy: .public)"
+                )
+            }
+        }
 #if os(iOS)
         .toolbar(
             removing: UIDevice.current.userInterfaceIdiom == .pad
@@ -173,18 +238,14 @@ struct SubscriptionsView: View {
         }
     }
 
-    private var articleCountDescription: String {
-        activeArticles.count == 1
+    private func articleCountDescription(_ count: Int) -> String {
+        count == 1
             ? "1 article"
-            : "\(activeArticles.count) articles"
+            : "\(count) articles"
     }
 
     private func unreadCountDescription(_ count: Int) -> String {
         count == 1 ? "1 unread article" : "\(count) unread articles"
-    }
-
-    private func unreadCount(for feed: Feed) -> Int {
-        articles.count { $0.feedID == feed.id && !$0.isRead }
     }
 
     private func deleteFeeds(at offsets: IndexSet) {
@@ -222,8 +283,42 @@ struct SubscriptionsView: View {
     }
 }
 
+nonisolated struct SubscriptionArticleCounts: Equatable, Sendable {
+    static let empty = SubscriptionArticleCounts(
+        total: 0,
+        unreadByFeedID: [:]
+    )
+
+    let total: Int
+    private let unreadByFeedID: [UUID: Int]
+
+    init(total: Int, unreadByFeedID: [UUID: Int]) {
+        self.total = total
+        self.unreadByFeedID = unreadByFeedID
+    }
+
+    init(articles: [Article], activeFeedIDs: Set<UUID>) {
+        var total = 0
+        var unreadByFeedID: [UUID: Int] = [:]
+
+        for article in articles where activeFeedIDs.contains(article.feedID) {
+            total += 1
+            if !article.isRead {
+                unreadByFeedID[article.feedID, default: 0] += 1
+            }
+        }
+
+        self.init(total: total, unreadByFeedID: unreadByFeedID)
+    }
+
+    func unreadCount(for feedID: UUID) -> Int {
+        unreadByFeedID[feedID, default: 0]
+    }
+}
+
 private struct FeedIconView: View {
     let data: Data?
+    @State private var image: CGImage?
 
     var body: some View {
         ZStack {
@@ -231,32 +326,25 @@ private struct FeedIconView: View {
                 .fill(.secondary.opacity(0.1))
 
             Group {
-                #if canImport(UIKit)
-                    if let data, let image = UIImage(data: data) {
-                        Image(uiImage: image)
-                            .resizable()
-                            .scaledToFit()
-                            .clipShape(RoundedRectangle(cornerRadius: 4))
-                    } else {
-                        placeholder
-                    }
-                #elseif canImport(AppKit)
-                    if let data, let image = NSImage(data: data) {
-                        Image(nsImage: image)
-                            .resizable()
-                            .scaledToFit()
-                            .clipShape(RoundedRectangle(cornerRadius: 4))
-                    } else {
-                        placeholder
-                    }
-                #else
+                if let image {
+                    Image(decorative: image, scale: 1)
+                        .resizable()
+                        .scaledToFit()
+                        .clipShape(RoundedRectangle(cornerRadius: 4))
+                } else {
                     placeholder
-                #endif
+                }
             }
             .frame(width: 20, height: 20)
         }
         .frame(width: 28, height: 28)
         .accessibilityHidden(true)
+        .task(id: data) {
+            image = nil
+            let thumbnail = await FeedIconService.thumbnail(from: data)
+            guard !Task.isCancelled else { return }
+            image = thumbnail
+        }
     }
 
     private var placeholder: some View {

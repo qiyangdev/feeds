@@ -1,9 +1,13 @@
+import CryptoKit
 import Foundation
 import ImageIO
 
-enum FeedIconService {
+nonisolated enum FeedIconService {
     private static let maximumIconSize = 2_000_000
+    private static let thumbnailPixelSize = 64
+    private static let thumbnailCache = ThumbnailCache(maximumEntryCount: 128)
 
+    @concurrent
     static func fetchIconData(siteURLString: String?, feedURL: URL) async -> Data? {
         let siteURL = normalizedSiteURL(siteURLString) ?? originURL(for: feedURL)
         guard let siteURL else { return nil }
@@ -21,6 +25,15 @@ enum FeedIconService {
             if let data = await fetchImage(from: url) { return data }
         }
         return nil
+    }
+
+    @concurrent
+    static func thumbnail(from data: Data?) async -> CGImage? {
+        guard let data, !data.isEmpty else { return nil }
+        return await thumbnailCache.thumbnail(
+            for: data,
+            maximumPixelSize: thumbnailPixelSize
+        )
     }
 
     static func candidateURLs(in html: String, relativeTo pageURL: URL) -> [URL] {
@@ -115,5 +128,90 @@ enum FeedIconService {
             return nil
         }
         return data
+    }
+
+    private static func makeThumbnail(
+        from data: Data,
+        maximumPixelSize: Int
+    ) -> CGImage? {
+        let sourceOptions = [
+            kCGImageSourceShouldCache: false
+        ] as CFDictionary
+        guard let source = CGImageSourceCreateWithData(
+            data as CFData,
+            sourceOptions
+        ) else {
+            return nil
+        }
+
+        let thumbnailOptions: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceThumbnailMaxPixelSize: maximumPixelSize,
+            kCGImageSourceShouldCacheImmediately: true
+        ]
+        return CGImageSourceCreateThumbnailAtIndex(
+            source,
+            0,
+            thumbnailOptions as CFDictionary
+        )
+    }
+
+    private actor ThumbnailCache {
+        private nonisolated struct Key: Hashable, Sendable {
+            let digest: SHA256.Digest
+            let maximumPixelSize: Int
+        }
+
+        private let maximumEntryCount: Int
+        private var images: [Key: CGImage] = [:]
+        private var recency: [Key] = []
+
+        init(maximumEntryCount: Int) {
+            self.maximumEntryCount = max(1, maximumEntryCount)
+        }
+
+        func thumbnail(
+            for data: Data,
+            maximumPixelSize: Int
+        ) -> CGImage? {
+            let key = Key(
+                digest: SHA256.hash(data: data),
+                maximumPixelSize: maximumPixelSize
+            )
+            if let image = images[key] {
+                markAsRecentlyUsed(key)
+                return image
+            }
+
+            guard !Task.isCancelled,
+                let image = FeedIconService.makeThumbnail(
+                    from: data,
+                    maximumPixelSize: maximumPixelSize
+                )
+            else {
+                return nil
+            }
+
+            images[key] = image
+            markAsRecentlyUsed(key)
+            discardOldestImageIfNeeded()
+            return image
+        }
+
+        private func markAsRecentlyUsed(_ key: Key) {
+            recency.removeAll { $0 == key }
+            recency.append(key)
+        }
+
+        private func discardOldestImageIfNeeded() {
+            guard images.count > maximumEntryCount,
+                let oldestKey = recency.first
+            else {
+                return
+            }
+            recency.removeFirst()
+            images.removeValue(forKey: oldestKey)
+        }
     }
 }

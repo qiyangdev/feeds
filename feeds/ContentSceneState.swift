@@ -234,7 +234,8 @@ enum ContentSceneResolver {
                 return .resolved(article)
             }
             if let article = eligibleArticles.first(where: {
-                $0.id == reference.id
+                $0.feedID == resolvedFeedID
+                    && $0.id == reference.id
             }) {
                 return .resolved(article)
             }

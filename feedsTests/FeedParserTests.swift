@@ -39,6 +39,30 @@ struct FeedParserTests {
         #expect(result.entries[0].summary == "Hello RSS .")
     }
 
+    @Test
+    nonisolated func parsesRSSFromDetachedTask() async throws {
+        let xml = """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <rss version="2.0"><channel>
+          <title>Detached RSS</title><link>https://example.com</link>
+          <item><title>Background post</title>
+          <link>https://example.com/background</link>
+          <guid>background-post</guid>
+          <description>Parsed away from the main actor.</description></item>
+        </channel></rss>
+        """
+        let data = Data(xml.utf8)
+
+        let result = try await Task.detached {
+            try FeedParser().parse(data)
+        }.value
+
+        #expect(result.title == "Detached RSS")
+        #expect(result.entries.count == 1)
+        #expect(result.entries.first?.id == "background-post")
+        #expect(result.entries.first?.title == "Background post")
+    }
+
     @Test func parsesAtom() throws {
         let xml = """
         <?xml version="1.0" encoding="utf-8"?>

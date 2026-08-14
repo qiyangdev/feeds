@@ -1,9 +1,13 @@
+import Combine
+import CoreData
 import OSLog
 import SwiftData
 import SwiftUI
 
-#if os(iOS)
+#if canImport(UIKit)
     import UIKit
+#elseif canImport(AppKit)
+    import AppKit
 #endif
 
 private let cloudDataLogger = Logger(
@@ -11,26 +15,140 @@ private let cloudDataLogger = Logger(
     category: "CloudDataReconciliation"
 )
 
-private struct CloudDataSnapshot: Hashable {
-    let feeds: [String]
-    let articles: [String]
-}
-
 private struct SceneResolutionSnapshot: Hashable {
     let state: ContentSceneState
-    let feeds: [String]
-    let articles: [String]
+    let feeds: [FeedResolutionRecord]
+    let articles: [ArticleResolutionRecord]
+
+    struct FeedResolutionRecord: Hashable {
+        let id: UUID
+        let feedURLString: String
+        let deletedAt: Date?
+        let mergedIntoFeedID: UUID?
+    }
+
+    struct ArticleResolutionRecord: Hashable {
+        let id: UUID
+        let articleKey: String
+        let feedID: UUID
+    }
 }
 
 struct ContentView: View {
-    @Environment(\.modelContext) private var modelContext
-    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @Environment(\.feedsModelContainer) private var modelContainer
+    @Environment(\.cloudDataReconciliationController)
+    private var reconciliationController
     @Query(sort: \Feed.dateAdded) private var allFeeds: [Feed]
-    @Query private var articles: [Article]
     @Binding private var restorationData: Data?
+    @State private var reconciliationRevision = 0
 
     init(restorationData: Binding<Data?> = .constant(nil)) {
         _restorationData = restorationData
+    }
+
+    var body: some View {
+        ContentNavigationView(
+            allFeeds: allFeeds,
+            restorationData: $restorationData
+        )
+        .onReceive(
+            NotificationCenter.default.publisher(
+                for: NSPersistentCloudKitContainer.eventChangedNotification
+            )
+            .receive(on: DispatchQueue.main)
+        ) { notification in
+            guard let event = notification.userInfo?[
+                NSPersistentCloudKitContainer.eventNotificationUserInfoKey
+            ] as? NSPersistentCloudKitContainer.Event,
+                event.type == .import,
+                event.endDate != nil,
+                event.succeeded
+            else {
+                return
+            }
+            reconciliationRevision &+= 1
+        }
+        .task(id: reconciliationRevision) {
+            guard let modelContainer, let reconciliationController else {
+                return
+            }
+            do {
+                try await Task.sleep(for: .milliseconds(200))
+                try Task.checkCancellation()
+                try await reconciliationController.reconcileIfNeeded(
+                    in: modelContainer
+                )
+            } catch {
+                guard !(error is CancellationError) else { return }
+                cloudDataLogger.error(
+                    "Unable to reconcile imported CloudKit data: \(error.localizedDescription, privacy: .public)"
+                )
+            }
+        }
+        .onReceive(
+            NotificationCenter.default.publisher(
+                for: applicationDidBecomeActiveNotification
+            )
+            .receive(on: DispatchQueue.main)
+        ) { _ in
+            reconciliationRevision &+= 1
+        }
+    }
+}
+
+private var applicationDidBecomeActiveNotification: Notification.Name {
+    #if canImport(UIKit)
+        UIApplication.didBecomeActiveNotification
+    #elseif canImport(AppKit)
+        NSApplication.didBecomeActiveNotification
+    #endif
+}
+
+private struct ContentNavigationView: View {
+    @Environment(\.modelContext) private var modelContext
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @Query private var articles: [Article]
+    let allFeeds: [Feed]
+    @Binding private var restorationData: Data?
+
+    init(allFeeds: [Feed], restorationData: Binding<Data?>) {
+        self.allFeeds = allFeeds
+        _restorationData = restorationData
+        let reference = ContentSceneState.restored(
+            from: restorationData.wrappedValue
+        )?.article
+        _articles = Query(
+            filter: FeedPersistenceQueries.restoredArticlePredicate(
+                reference: reference,
+                candidateArticleKeys: Self.candidateArticleKeys(
+                    reference: reference,
+                    feeds: allFeeds
+                )
+            )
+        )
+    }
+
+    private static func candidateArticleKeys(
+        reference: StoredArticleReference?,
+        feeds: [Feed]
+    ) -> [String] {
+        guard let reference else { return [] }
+        var keys = [reference.key]
+        if case .resolved(let resolvedFeedID) = ContentSceneResolver.resolveFeed(
+            id: reference.feedID,
+            feeds: feeds
+        ) {
+            let remoteID: Substring
+            if let separator = reference.key.firstIndex(of: "|") {
+                remoteID = reference.key[
+                    reference.key.index(after: separator)...
+                ]
+            } else {
+                remoteID = reference.key[...]
+            }
+            keys.append("\(resolvedFeedID.uuidString)|\(remoteID)")
+        }
+        return Array(Set(keys)).sorted()
     }
 
     private var sceneState: ContentSceneState {
@@ -137,24 +255,24 @@ struct ContentView: View {
         #endif
     }
 
-    private var cloudDataSnapshot: CloudDataSnapshot {
-        CloudDataSnapshot(
-            feeds: allFeeds
-                .map {
-                    "\($0.id.uuidString)|\($0.feedURLString)|\($0.deletedAt?.timeIntervalSinceReferenceDate ?? -1)|\($0.mergedIntoFeedID?.uuidString ?? "-")"
-                }
-                .sorted(),
-            articles: articles
-                .map { "\($0.id.uuidString)|\($0.articleKey)|\($0.feedID.uuidString)" }
-                .sorted()
-        )
-    }
-
     private var sceneResolutionSnapshot: SceneResolutionSnapshot {
         SceneResolutionSnapshot(
             state: sceneState,
-            feeds: cloudDataSnapshot.feeds,
-            articles: cloudDataSnapshot.articles
+            feeds: allFeeds.map {
+                .init(
+                    id: $0.id,
+                    feedURLString: $0.feedURLString,
+                    deletedAt: $0.deletedAt,
+                    mergedIntoFeedID: $0.mergedIntoFeedID
+                )
+            },
+            articles: articles.map {
+                .init(
+                    id: $0.id,
+                    articleKey: $0.articleKey,
+                    feedID: $0.feedID
+                )
+            }
         )
     }
 
@@ -231,15 +349,6 @@ struct ContentView: View {
                 )
             }
         }
-        .task(id: cloudDataSnapshot) {
-            do {
-                try CloudDataReconciler.reconcile(in: modelContext)
-            } catch {
-                cloudDataLogger.error(
-                    "Unable to reconcile imported CloudKit data: \(error.localizedDescription, privacy: .public)"
-                )
-            }
-        }
         .task(id: sceneResolutionSnapshot) {
             normalizeSceneState()
         }
@@ -308,7 +417,7 @@ struct ContentView: View {
 
     private var selectedArticleKeyBinding: Binding<String?> {
         Binding(
-            get: { selectedArticle?.articleKey },
+            get: { sceneState.article?.key },
             set: { articleKey in
                 if articleKey == nil, isRestoringArticle {
                     return
@@ -341,19 +450,22 @@ struct ContentView: View {
         matching articleKey: String,
         in selection: SubscriptionSelection
     ) -> Article? {
-        articles.first { article in
-            guard article.articleKey == articleKey,
-                activeFeedIDs.contains(article.feedID)
-            else {
-                return false
+        let feedIDs: [UUID]
+        switch selection {
+        case .all:
+            feedIDs = activeFeedIDs.sorted {
+                $0.uuidString < $1.uuidString
             }
-            switch selection {
-            case .all:
-                return true
-            case .feed(let feedID):
-                return article.feedID == feedID
-            }
+        case .feed(let feedID):
+            guard activeFeedIDs.contains(feedID) else { return nil }
+            feedIDs = [feedID]
         }
+        return try? modelContext.fetch(
+            FeedPersistenceQueries.articles(
+                articleKey: articleKey,
+                feedIDs: feedIDs
+            )
+        ).first
     }
 
     @MainActor
@@ -503,6 +615,10 @@ private extension StoredArticleReference {
 
     ContentView(restorationData: $restorationData)
         .environment(\.feedsModelContainer, container)
+        .environment(
+            \.cloudDataReconciliationController,
+            CloudDataReconciliationController()
+        )
         .modelContainer(container)
 }
 
@@ -512,5 +628,9 @@ private extension StoredArticleReference {
 
     ContentView(restorationData: $restorationData)
         .environment(\.feedsModelContainer, container)
+        .environment(
+            \.cloudDataReconciliationController,
+            CloudDataReconciliationController()
+        )
         .modelContainer(container)
 }

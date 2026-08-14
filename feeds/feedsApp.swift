@@ -21,6 +21,9 @@ private enum UITestSampleData {
 
 @main
 struct feedsApp: App {
+    private let cloudDataReconciliationController =
+        CloudDataReconciliationController()
+
     private let sharedModelContainer: ModelContainer = {
         let arguments = ProcessInfo.processInfo.arguments
         let environment = ProcessInfo.processInfo.environment
@@ -60,9 +63,6 @@ struct feedsApp: App {
                     : .private(FeedsStore.cloudKitContainerIdentifier)
             )
             container.mainContext.autosaveEnabled = false
-            if !isInitializingCloudKitSchema {
-                try CloudDataReconciler.reconcile(in: container.mainContext)
-            }
             if arguments.contains("-ui-testing-sample")
                 || arguments.contains("-ui-testing-restoration-sample")
             {
@@ -146,6 +146,10 @@ struct feedsApp: App {
         WindowGroup {
             ContentSceneHost()
                 .environment(\.feedsModelContainer, sharedModelContainer)
+                .environment(
+                    \.cloudDataReconciliationController,
+                    cloudDataReconciliationController
+                )
                 .preferredColorScheme(appAppearanceMode.colorScheme)
                 #if DEBUG
                     .task {

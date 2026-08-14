@@ -58,6 +58,129 @@ struct FeedSyncPersistenceTests {
         }
     }
 
+    @Test func feedScopedArticleQueryFetchesOnlyTheTargetFeed() throws {
+        let fixture = try TestStore()
+        let targetFeedID = UUID()
+        let otherFeedID = UUID()
+        let targetArticles = [
+            Article(
+                articleKey: "\(targetFeedID.uuidString)|first",
+                feedID: targetFeedID,
+                feedTitle: "Target",
+                title: "First target article"
+            ),
+            Article(
+                articleKey: "\(targetFeedID.uuidString)|second",
+                feedID: targetFeedID,
+                feedTitle: "Target",
+                title: "Second target article"
+            ),
+        ]
+        let otherArticles = [
+            Article(
+                articleKey: "\(otherFeedID.uuidString)|first",
+                feedID: otherFeedID,
+                feedTitle: "Other",
+                title: "First other article"
+            ),
+            Article(
+                articleKey: "\(otherFeedID.uuidString)|second",
+                feedID: otherFeedID,
+                feedTitle: "Other",
+                title: "Second other article"
+            ),
+        ]
+        for article in targetArticles + otherArticles {
+            fixture.context.insert(article)
+        }
+        try fixture.context.save()
+
+        let fetched = try fixture.context.fetch(
+            FeedPersistenceQueries.articles(feedID: targetFeedID)
+        )
+
+        #expect(Set(fetched.map(\.id)) == Set(targetArticles.map(\.id)))
+        #expect(fetched.allSatisfy { $0.feedID == targetFeedID })
+    }
+
+    @Test func payloadScopedArticleQueryFetchesOnlyIncomingKeys() throws {
+        let fixture = try TestStore()
+        let targetFeedID = UUID()
+        let otherFeedID = UUID()
+        let incomingKey = "\(targetFeedID.uuidString)|incoming"
+        let incoming = Article(
+            articleKey: incomingKey,
+            feedID: targetFeedID,
+            feedTitle: "Target",
+            title: "Incoming"
+        )
+        let historical = Article(
+            articleKey: "\(targetFeedID.uuidString)|historical",
+            feedID: targetFeedID,
+            feedTitle: "Target",
+            title: "Historical"
+        )
+        let otherFeed = Article(
+            articleKey: incomingKey,
+            feedID: otherFeedID,
+            feedTitle: "Other",
+            title: "Other feed"
+        )
+        for article in [incoming, historical, otherFeed] {
+            fixture.context.insert(article)
+        }
+        try fixture.context.save()
+
+        let matches = try fixture.context.fetch(
+            FeedPersistenceQueries.articles(
+                feedID: targetFeedID,
+                articleKeys: [incomingKey]
+            )
+        )
+        let emptyMatches = try fixture.context.fetch(
+            FeedPersistenceQueries.articles(
+                feedID: targetFeedID,
+                articleKeys: []
+            )
+        )
+
+        #expect(matches.map(\.id) == [incoming.id])
+        #expect(emptyMatches.isEmpty)
+    }
+
+    @Test func articleIDQueryFetchesTwoRowsToDetectLegacyDuplicates() throws {
+        let fixture = try TestStore()
+        let feedID = UUID()
+        let duplicateID = UUID()
+        for index in 0..<3 {
+            fixture.context.insert(
+                Article(
+                    id: duplicateID,
+                    articleKey: "\(feedID.uuidString)|duplicate-\(index)",
+                    feedID: feedID,
+                    feedTitle: "Example",
+                    title: "Duplicate \(index)"
+                )
+            )
+        }
+        fixture.context.insert(
+            Article(
+                articleKey: "\(feedID.uuidString)|unrelated",
+                feedID: feedID,
+                feedTitle: "Example",
+                title: "Unrelated"
+            )
+        )
+        try fixture.context.save()
+
+        let descriptor = FeedPersistenceQueries.articles(id: duplicateID)
+        let fetched = try fixture.context.fetch(descriptor)
+
+        #expect(descriptor.fetchLimit == 2)
+        #expect(fetched.count == 2)
+        #expect(fetched.allSatisfy { $0.id == duplicateID })
+    }
+
     @Test func repeatedRefreshDeduplicatesAndPreservesUserState() async throws {
         let fixture = try TestStore()
         let feed = Feed(
@@ -186,6 +309,98 @@ struct FeedSyncPersistenceTests {
         #expect(mergedArticle.isRead)
         #expect(mergedArticle.isStarred)
         #expect(mergedArticle.extractedMarkdown == "# Cached article")
+    }
+
+    @Test func refreshOnlyMutatesTargetFeedArticles() async throws {
+        let fixture = try TestStore()
+        let targetFeed = Feed(
+            id: UUID(),
+            feedURLString: "https://unit.test/example.xml",
+            title: "Target"
+        )
+        let otherFeed = Feed(
+            id: UUID(),
+            feedURLString: "https://unit.test/other.xml",
+            title: "Other"
+        )
+        let targetArticle = Article(
+            articleKey: "\(targetFeed.id.uuidString)|shared-entry-id",
+            feedID: targetFeed.id,
+            feedTitle: targetFeed.title,
+            title: "Stale target article"
+        )
+        let otherArticleKey =
+            "\(otherFeed.id.uuidString)|shared-entry-id"
+        let firstOtherArticle = Article(
+            id: UUID(
+                uuidString: "00000000-0000-0000-0000-000000000011"
+            )!,
+            articleKey: otherArticleKey,
+            feedID: otherFeed.id,
+            feedTitle: otherFeed.title,
+            title: "First other copy",
+            isRead: true,
+            readModifiedAt: Date(timeIntervalSince1970: 100)
+        )
+        let secondOtherArticle = Article(
+            id: UUID(
+                uuidString: "00000000-0000-0000-0000-000000000012"
+            )!,
+            articleKey: otherArticleKey,
+            feedID: otherFeed.id,
+            feedTitle: otherFeed.title,
+            title: "Second other copy",
+            isStarred: true,
+            extractedMarkdown: "# Other cached article",
+            starredModifiedAt: Date(timeIntervalSince1970: 200),
+            extractedModifiedAt: Date(timeIntervalSince1970: 300)
+        )
+        fixture.context.insert(targetFeed)
+        fixture.context.insert(otherFeed)
+        fixture.context.insert(targetArticle)
+        fixture.context.insert(firstOtherArticle)
+        fixture.context.insert(secondOtherArticle)
+        try fixture.context.save()
+
+        try await FeedSyncService.refresh(
+            targetFeed,
+            modelContext: fixture.context
+        )
+
+        let articles = try fixture.context.fetch(FetchDescriptor<Article>())
+        let refreshedTargetArticles = articles.filter {
+            $0.feedID == targetFeed.id
+        }
+        let untouchedOtherArticles = articles.filter {
+            $0.feedID == otherFeed.id
+        }
+        let persistedFirstOther = try #require(
+            untouchedOtherArticles.first { $0.id == firstOtherArticle.id }
+        )
+        let persistedSecondOther = try #require(
+            untouchedOtherArticles.first { $0.id == secondOtherArticle.id }
+        )
+
+        #expect(refreshedTargetArticles.count == 1)
+        #expect(refreshedTargetArticles.first?.title == "Article")
+        #expect(untouchedOtherArticles.count == 2)
+        #expect(persistedFirstOther.title == "First other copy")
+        #expect(persistedFirstOther.isRead)
+        #expect(
+            persistedFirstOther.readModifiedAt
+                == Date(timeIntervalSince1970: 100)
+        )
+        #expect(persistedSecondOther.title == "Second other copy")
+        #expect(persistedSecondOther.isStarred)
+        #expect(persistedSecondOther.extractedMarkdown == "# Other cached article")
+        #expect(
+            persistedSecondOther.starredModifiedAt
+                == Date(timeIntervalSince1970: 200)
+        )
+        #expect(
+            persistedSecondOther.extractedModifiedAt
+                == Date(timeIntervalSince1970: 300)
+        )
     }
 
     @Test func sameEntryIdentityIsIsolatedBetweenFeeds() async throws {

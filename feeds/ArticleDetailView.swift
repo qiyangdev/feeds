@@ -209,8 +209,11 @@ struct ArticleDetailView: View {
     private func extractedContent(_ markdown: String) -> some View {
         ArticleMarkdownView(
             markdown: markdown,
+            baseURL: article.url,
+            contentRevision: extractionPresentation.contentRevision,
             appearance: readingAppearance
         )
+        .id(article.id)
     }
 
     private var readingAppearance: ArticleReadingAppearance {
@@ -435,6 +438,7 @@ struct ArticleDetailView: View {
 struct ArticleExtractionPresentationState: Equatable {
     private(set) var displayedMarkdown: String?
     private(set) var isShowingExtractedContent: Bool
+    private(set) var contentRevision = UUID()
 
     init(cachedMarkdown: String?) {
         displayedMarkdown = cachedMarkdown
@@ -442,6 +446,9 @@ struct ArticleExtractionPresentationState: Equatable {
     }
 
     mutating func reset(cachedMarkdown: String?) {
+        if displayedMarkdown != cachedMarkdown {
+            contentRevision = UUID()
+        }
         displayedMarkdown = cachedMarkdown
         isShowingExtractedContent = cachedMarkdown != nil
     }
@@ -463,6 +470,9 @@ struct ArticleExtractionPresentationState: Equatable {
     }
 
     mutating func extractionSucceeded(markdown: String) {
+        if displayedMarkdown != markdown {
+            contentRevision = UUID()
+        }
         displayedMarkdown = markdown
         isShowingExtractedContent = true
     }

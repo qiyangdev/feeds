@@ -3,6 +3,12 @@ import SwiftData
 
 @Model
 final class Feed {
+    #Index<Feed>(
+        [\.id],
+        [\.dateAdded],
+        [\.deletedAt, \.mergedIntoFeedID]
+    )
+
     var id: UUID = UUID()
     var feedURLString: String = ""
     var title: String = ""
@@ -54,6 +60,14 @@ final class Feed {
 
 @Model
 final class Article {
+    #Index<Article>(
+        [\.id],
+        [\.articleKey],
+        [\.feedID, \.publishedAt],
+        [\.feedID, \.isRead],
+        [\.publishedAt]
+    )
+
     var id: UUID = UUID()
     var articleKey: String = ""
     var feedID: UUID = UUID()
