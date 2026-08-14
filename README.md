@@ -62,7 +62,7 @@ feeds/
 
 1. Clone the repository:
    ```bash
-   git clone <repo-url>
+   git clone https://github.com/qiyangdev/feeds.git
    cd feeds
    ```
 2. Open `feeds.xcodeproj` in Xcode.
