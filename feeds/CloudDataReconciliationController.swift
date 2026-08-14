@@ -82,7 +82,8 @@ actor CloudDataReconciliationController {
             let snapshot = try CloudDataStructureSnapshot(in: modelContext)
             guard snapshot != lastCleanSnapshot else { return }
 
-            let needsReconciliation = try CloudDataReconciler
+            let needsReconciliation =
+                try CloudDataReconciler
                 .needsReconciliation(in: modelContext)
             guard needsReconciliation else {
                 #if DEBUG

@@ -51,7 +51,9 @@ struct FeedArticlesView: View {
                 ContentUnavailableView(
                     "Select a Feed",
                     systemImage: "dot.radiowaves.left.and.right",
-                    description: Text("Articles from the selected feed appear here.")
+                    description: Text(
+                        "Articles from the selected feed appear here."
+                    )
                 )
             } else {
                 ArticleQueryResultsView(
@@ -73,7 +75,9 @@ struct FeedArticlesView: View {
                 )
             }
         }
-        .navigationTitle(showsAllArticles ? "All" : selectedFeed?.title ?? "Articles")
+        .navigationTitle(
+            showsAllArticles ? "All" : selectedFeed?.title ?? "Articles"
+        )
         .searchable(text: $searchText, prompt: "Search Articles")
         .task(id: searchText) {
             if searchText.isEmpty {
@@ -188,7 +192,9 @@ struct FeedArticlesView: View {
                         modelContext: modelContext
                     )
                 } catch {
-                    failures.append("\(feed.title): \(error.localizedDescription)")
+                    failures.append(
+                        "\(feed.title): \(error.localizedDescription)"
+                    )
                 }
             }
             if !failures.isEmpty {
@@ -326,14 +332,16 @@ private struct ArticlePageResultsView: View {
 
     private var selectedArticleOutsidePage: Article? {
         selectedArticles.first { selectedArticle in
-            let matchesSearch = searchText.isEmpty
+            let matchesSearch =
+                searchText.isEmpty
                 || selectedArticle.title.localizedStandardContains(searchText)
                 || selectedArticle.summaryText.localizedStandardContains(
                     searchText
                 )
-            return matchesSearch && !articles.contains {
-                $0.persistentModelID == selectedArticle.persistentModelID
-            }
+            return matchesSearch
+                && !articles.contains {
+                    $0.persistentModelID == selectedArticle.persistentModelID
+                }
         }
     }
 
@@ -412,9 +420,9 @@ private struct ArticlePageResultsView: View {
     }
 }
 
-private extension View {
+extension View {
     @ViewBuilder
-    func articleListStyle() -> some View {
+    fileprivate func articleListStyle() -> some View {
         #if os(iOS)
             listRowSpacing(12)
                 .listStyle(.insetGrouped)

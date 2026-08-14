@@ -3,7 +3,9 @@ import SwiftData
 
 @MainActor
 enum PreviewSampleData {
-    static let primaryFeedID = UUID(uuidString: "B5595529-31E6-4CF3-B5B7-39B2E568A221")!
+    static let primaryFeedID = UUID(
+        uuidString: "B5595529-31E6-4CF3-B5B7-39B2E568A221"
+    )!
 
     static func makeContainer(populated: Bool = true) -> ModelContainer {
         do {
@@ -21,7 +23,8 @@ enum PreviewSampleData {
     }
 
     static func primaryFeed(in container: ModelContainer) -> Feed {
-        let feeds = (try? container.mainContext.fetch(FetchDescriptor<Feed>())) ?? []
+        let feeds =
+            (try? container.mainContext.fetch(FetchDescriptor<Feed>())) ?? []
         guard let feed = feeds.first(where: { $0.id == primaryFeedID }) else {
             fatalError("Preview primary feed is missing")
         }
@@ -29,8 +32,13 @@ enum PreviewSampleData {
     }
 
     static func featuredArticle(in container: ModelContainer) -> Article {
-        let articles = (try? container.mainContext.fetch(FetchDescriptor<Article>())) ?? []
-        guard let article = articles.first(where: { $0.articleKey == "preview-swiftui" }) else {
+        let articles =
+            (try? container.mainContext.fetch(FetchDescriptor<Article>())) ?? []
+        guard
+            let article = articles.first(where: {
+                $0.articleKey == "preview-swiftui"
+            })
+        else {
             fatalError("Preview featured article is missing")
         }
         return article
@@ -63,23 +71,25 @@ enum PreviewSampleData {
                 articleKey: "preview-swiftui",
                 feedID: designFeed.id,
                 feedTitle: designFeed.title,
-                title: "Building a More Native SwiftUI Three-Column Interface for macOS",
+                title:
+                    "Building a More Native SwiftUI Three-Column Interface for macOS",
                 urlString: "https://example.com/design/swiftui-macos",
-                summaryText: "Refine a cross-platform RSS reader—from the sidebar and article list to the detail toolbar—with interactions that feel at home on the desktop.",
+                summaryText:
+                    "Refine a cross-platform RSS reader—from the sidebar and article list to the detail toolbar—with interactions that feel at home on the desktop.",
                 author: "Qiyang Wang",
                 publishedAt: Date.now.addingTimeInterval(-3_600),
                 isStarred: true,
                 extractedMarkdown: """
-                ## Start with the Information Architecture
+                    ## Start with the Information Architecture
 
-                `NavigationSplitView` works well for an RSS reader because feeds, articles, and content form a stable hierarchy.
+                    `NavigationSplitView` works well for an RSS reader because feeds, articles, and content form a stable hierarchy.
 
-                - Preserve native selection behavior in the sidebar
-                - Emphasize titles and read status in the article list
-                - Provide content extraction and favorite actions in the detail view
+                    - Preserve native selection behavior in the sidebar
+                    - Emphasize titles and read status in the article list
+                    - Provide content extraction and favorite actions in the detail view
 
-                > A good cross-platform interface respects each platform's interaction conventions.
-                """
+                    > A good cross-platform interface respects each platform's interaction conventions.
+                    """
             )
         )
         context.insert(
@@ -89,7 +99,8 @@ enum PreviewSampleData {
                 feedTitle: designFeed.title,
                 title: "Small Products Deserve Design Systems Too",
                 urlString: "https://example.com/design/systems",
-                summaryText: "Use semantic colors, spacing, and component constraints to reduce visual drift during UI iteration.",
+                summaryText:
+                    "Use semantic colors, spacing, and component constraints to reduce visual drift during UI iteration.",
                 author: "Design Details",
                 publishedAt: Date.now.addingTimeInterval(-86_400),
                 isRead: true
@@ -102,7 +113,8 @@ enum PreviewSampleData {
                 feedTitle: swiftFeed.title,
                 title: "This Week in the Swift Community",
                 urlString: "https://example.com/swift/weekly",
-                summaryText: "The latest developments in Swift Concurrency, SwiftData, and the open-source ecosystem.",
+                summaryText:
+                    "The latest developments in Swift Concurrency, SwiftData, and the open-source ecosystem.",
                 publishedAt: Date.now.addingTimeInterval(-172_800)
             )
         )

@@ -63,7 +63,8 @@ nonisolated final class FeedParser: NSObject, XMLParserDelegate {
         parser.shouldProcessNamespaces = false
 
         guard parser.parse(), parseError == nil else {
-            throw parseError ?? parser.parserError ?? FeedParserError.invalidDocument
+            throw parseError ?? parser.parserError
+                ?? FeedParserError.invalidDocument
         }
         guard !entries.isEmpty else { throw FeedParserError.emptyFeed }
 
@@ -101,7 +102,9 @@ nonisolated final class FeedParser: NSObject, XMLParserDelegate {
 
         guard name == "link", let href = attributeDict["href"] else { return }
         let relationship = attributeDict["rel"]?.lowercased() ?? "alternate"
-        guard relationship == "alternate" || relationship.isEmpty else { return }
+        guard relationship == "alternate" || relationship.isEmpty else {
+            return
+        }
 
         if entry != nil {
             entry?.url = href
@@ -145,14 +148,19 @@ nonisolated final class FeedParser: NSObject, XMLParserDelegate {
                 if current.url == nil, !value.isEmpty { current.url = value }
             case "guid", "id":
                 current.id = value
-            case "description", "summary", "content", "content:encoded", "encoded":
+            case "description", "summary", "content", "content:encoded",
+                "encoded":
                 if !value.isEmpty { current.summary = text.cleanedHTML }
             case "author", "dc:creator", "creator", "name":
-                if current.author == nil, !value.isEmpty { current.author = value }
+                if current.author == nil, !value.isEmpty {
+                    current.author = value
+                }
             case "pubdate", "published", "updated", "dc:date":
                 current.publishedAt = FeedDateParser.date(from: value)
             case "item", "entry":
-                let fallbackID = current.url ?? "\(current.title)|\(current.publishedAt?.timeIntervalSince1970 ?? 0)"
+                let fallbackID =
+                    current.url
+                    ?? "\(current.title)|\(current.publishedAt?.timeIntervalSince1970 ?? 0)"
                 entries.append(
                     ParsedEntry(
                         id: current.id.ifEmpty(fallbackID),
@@ -194,7 +202,7 @@ private nonisolated enum FeedDateParser {
         "EEE, d MMM yyyy HH:mm:ss Z",
         "dd MMM yyyy HH:mm:ss Z",
         "yyyy-MM-dd'T'HH:mm:ssZ",
-        "yyyy-MM-dd'T'HH:mm:ss.SSSZ"
+        "yyyy-MM-dd'T'HH:mm:ss.SSSZ",
     ]
 
     static func date(from value: String) -> Date? {
@@ -210,25 +218,31 @@ private nonisolated enum FeedDateParser {
         return nil
     }
 }
+nonisolated
 
-private nonisolated extension String {
-    var cleanedText: String {
+    extension String
+{
+    fileprivate var cleanedText: String {
         replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
             .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    var cleanedHTML: String {
-        replacingOccurrences(of: "<[^>]+>", with: " ", options: .regularExpression)
-            .replacingOccurrences(of: "&nbsp;", with: " ")
-            .replacingOccurrences(of: "&amp;", with: "&")
-            .replacingOccurrences(of: "&lt;", with: "<")
-            .replacingOccurrences(of: "&gt;", with: ">")
-            .replacingOccurrences(of: "&quot;", with: "\"")
-            .replacingOccurrences(of: "&#39;", with: "'")
-            .cleanedText
+    fileprivate var cleanedHTML: String {
+        replacingOccurrences(
+            of: "<[^>]+>",
+            with: " ",
+            options: .regularExpression
+        )
+        .replacingOccurrences(of: "&nbsp;", with: " ")
+        .replacingOccurrences(of: "&amp;", with: "&")
+        .replacingOccurrences(of: "&lt;", with: "<")
+        .replacingOccurrences(of: "&gt;", with: ">")
+        .replacingOccurrences(of: "&quot;", with: "\"")
+        .replacingOccurrences(of: "&#39;", with: "'")
+        .cleanedText
     }
 
-    func ifEmpty(_ fallback: String) -> String {
+    fileprivate func ifEmpty(_ fallback: String) -> String {
         isEmpty ? fallback : self
     }
 }

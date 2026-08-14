@@ -26,97 +26,109 @@ struct EditFeedView: View {
     var body: some View {
         NavigationStack {
             formContent
-            .navigationTitle("Edit Feed")
-#if !os(macOS)
-            .navigationBarTitleDisplayMode(.inline)
-#endif
-            .interactiveDismissDisabled(isSaving)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { dismiss() }
-                        .disabled(isSaving)
-                }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button(action: save) {
-                        if isSaving {
-                            ProgressView()
-                                .controlSize(.small)
-                                .accessibilityLabel("Saving feed")
-                        } else {
-                            Text("Save")
-                        }
+                .navigationTitle("Edit Feed")
+                #if !os(macOS)
+                    .navigationBarTitleDisplayMode(.inline)
+                #endif
+                .interactiveDismissDisabled(isSaving)
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button("Cancel") { dismiss() }
+                            .disabled(isSaving)
                     }
-                    .disabled(isSaveDisabled)
-                    .accessibilityIdentifier("confirmEditFeedButton")
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button(action: save) {
+                            if isSaving {
+                                ProgressView()
+                                    .controlSize(.small)
+                                    .accessibilityLabel("Saving feed")
+                            } else {
+                                Text("Save")
+                            }
+                        }
+                        .disabled(isSaveDisabled)
+                        .accessibilityIdentifier("confirmEditFeedButton")
+                    }
                 }
-            }
-            .alert(
-                "Unable to Save Feed",
-                isPresented: Binding(
-                    get: { errorMessage != nil },
-                    set: { if !$0 { errorMessage = nil } }
-                )
-            ) {
-                Button("OK", role: .cancel) { errorMessage = nil }
-            } message: {
-                Text(errorMessage ?? "Unknown error")
-            }
+                .alert(
+                    "Unable to Save Feed",
+                    isPresented: Binding(
+                        get: { errorMessage != nil },
+                        set: { if !$0 { errorMessage = nil } }
+                    )
+                ) {
+                    Button("OK", role: .cancel) { errorMessage = nil }
+                } message: {
+                    Text(errorMessage ?? "Unknown error")
+                }
         }
-#if os(macOS)
-        .frame(minWidth: 520, minHeight: 320)
-#endif
+        #if os(macOS)
+            .frame(minWidth: 520, minHeight: 320)
+        #endif
     }
 
     @ViewBuilder
     private var formContent: some View {
-#if os(macOS)
-        VStack(alignment: .leading, spacing: 12) {
-            Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: 12, verticalSpacing: 12) {
-                GridRow {
-                    Text("Name")
+        #if os(macOS)
+            VStack(alignment: .leading, spacing: 12) {
+                Grid(
+                    alignment: .leadingFirstTextBaseline,
+                    horizontalSpacing: 12,
+                    verticalSpacing: 12
+                ) {
+                    GridRow {
+                        Text("Name")
+                        titleField
+                    }
+                    GridRow {
+                        Text("Feed URL")
+                        urlField
+                    }
+                    GridRow {
+                        Text("Reading")
+                        autoExtractToggle
+                    }
+                }
+                Text(
+                    "Changing the URL validates the new feed and replaces the articles from the previous source."
+                )
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                Text(
+                    "When automatic extraction is enabled, opening an article extracts its full web content. Previously extracted content is reused."
+                )
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                Spacer()
+            }
+            .padding(20)
+        #else
+            Form {
+                Section("Name") {
                     titleField
                 }
-                GridRow {
-                    Text("Feed URL")
+
+                Section {
                     urlField
+                } header: {
+                    Text("Feed URL")
+                } footer: {
+                    Text(
+                        "Changing the URL validates the new feed and replaces the articles from the previous source."
+                    )
                 }
-                GridRow {
-                    Text("Reading")
+
+                Section {
                     autoExtractToggle
+                } header: {
+                    Text("Reading")
+                } footer: {
+                    Text(
+                        "Extract full content when opening articles from this feed. Previously extracted articles are reused."
+                    )
                 }
             }
-            Text("Changing the URL validates the new feed and replaces the articles from the previous source.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            Text("When automatic extraction is enabled, opening an article extracts its full web content. Previously extracted content is reused.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            Spacer()
-        }
-        .padding(20)
-#else
-        Form {
-            Section("Name") {
-                titleField
-            }
-
-            Section {
-                urlField
-            } header: {
-                Text("Feed URL")
-            } footer: {
-                Text("Changing the URL validates the new feed and replaces the articles from the previous source.")
-            }
-
-            Section {
-                autoExtractToggle
-            } header: {
-                Text("Reading")
-            } footer: {
-                Text("Extract full content when opening articles from this feed. Previously extracted articles are reused.")
-            }
-        }
-#endif
+        #endif
     }
 
     private var titleField: some View {
@@ -127,10 +139,10 @@ struct EditFeedView: View {
     private var urlField: some View {
         TextField("https://example.com/feed.xml", text: $urlText)
             .textContentType(.URL)
-#if !os(macOS)
-            .textInputAutocapitalization(.never)
-            .keyboardType(.URL)
-#endif
+            #if !os(macOS)
+                .textInputAutocapitalization(.never)
+                .keyboardType(.URL)
+            #endif
             .autocorrectionDisabled()
             .accessibilityIdentifier("editFeedURLField")
     }

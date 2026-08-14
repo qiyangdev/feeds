@@ -17,11 +17,13 @@ extension EnvironmentValues {
         set { self[ModelContainerEnvironmentKey.self] = newValue }
     }
 
-    var cloudDataReconciliationController:
-        CloudDataReconciliationController?
+    var cloudDataReconciliationController: CloudDataReconciliationController?
     {
         get { self[CloudDataReconciliationControllerEnvironmentKey.self] }
-        set { self[CloudDataReconciliationControllerEnvironmentKey.self] = newValue }
+        set {
+            self[CloudDataReconciliationControllerEnvironmentKey.self] =
+                newValue
+        }
     }
 }
 

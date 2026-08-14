@@ -180,7 +180,9 @@ final class ArticleAudioPlaybackController: ObservableObject {
 
     private func prepareCurrentSource() {
         guard sources.indices.contains(sourceIndex) else {
-            failPlayback("None of this article's audio sources could be played.")
+            failPlayback(
+                "None of this article's audio sources could be played."
+            )
             return
         }
 
@@ -232,7 +234,8 @@ final class ArticleAudioPlaybackController: ObservableObject {
                 else {
                     return
                 }
-                isBuffering = wantsPlayback
+                isBuffering =
+                    wantsPlayback
                     && player.timeControlStatus
                         == .waitingToPlayAtSpecifiedRate
                 if !wantsPlayback, state != .failed {
@@ -457,11 +460,10 @@ final class ArticleAudioPlaybackController: ObservableObject {
             object: item,
             queue: .main
         ) { [weak self] notification in
-            let message = (
-                notification.userInfo?[
+            let message =
+                (notification.userInfo?[
                     AVPlayerItemFailedToPlayToEndTimeErrorKey
-                ] as? Error
-            )?.localizedDescription ?? "Audio playback failed."
+                ] as? Error)?.localizedDescription ?? "Audio playback failed."
             Task { @MainActor [weak self] in
                 guard let self, generation == playbackGeneration else {
                     return
@@ -497,8 +499,19 @@ final class ArticleAudioPlaybackController: ObservableObject {
                 object: AVAudioSession.sharedInstance(),
                 queue: .main
             ) { [weak self] notification in
+                let rawType =
+                    notification.userInfo?[
+                        AVAudioSessionInterruptionTypeKey
+                    ] as? UInt
+                let rawOptions =
+                    notification.userInfo?[
+                        AVAudioSessionInterruptionOptionKey
+                    ] as? UInt
                 Task { @MainActor [weak self] in
-                    self?.handleInterruption(notification)
+                    self?.handleInterruption(
+                        rawType: rawType,
+                        rawOptions: rawOptions
+                    )
                 }
             }
             routeChangeObserver = center.addObserver(
@@ -506,8 +519,12 @@ final class ArticleAudioPlaybackController: ObservableObject {
                 object: AVAudioSession.sharedInstance(),
                 queue: .main
             ) { [weak self] notification in
+                let rawReason =
+                    notification.userInfo?[
+                        AVAudioSessionRouteChangeReasonKey
+                    ] as? UInt
                 Task { @MainActor [weak self] in
-                    self?.handleRouteChange(notification)
+                    self?.handleRouteChange(rawReason: rawReason)
                 }
             }
         #endif
@@ -528,10 +545,11 @@ final class ArticleAudioPlaybackController: ObservableObject {
     }
 
     #if os(iOS) || os(visionOS)
-        private func handleInterruption(_ notification: Notification) {
-            guard let rawType = notification.userInfo?[
-                AVAudioSessionInterruptionTypeKey
-            ] as? UInt,
+        private func handleInterruption(
+            rawType: UInt?,
+            rawOptions: UInt?
+        ) {
+            guard let rawType,
                 let type = AVAudioSession.InterruptionType(rawValue: rawType)
             else {
                 return
@@ -542,11 +560,8 @@ final class ArticleAudioPlaybackController: ObservableObject {
                 resumesAfterInterruption = wantsPlayback
                 pausePlayback()
             case .ended:
-                let rawOptions = notification.userInfo?[
-                    AVAudioSessionInterruptionOptionKey
-                ] as? UInt ?? 0
                 let shouldResume = AVAudioSession.InterruptionOptions(
-                    rawValue: rawOptions
+                    rawValue: rawOptions ?? 0
                 ).contains(.shouldResume)
                 let resume = resumesAfterInterruption && shouldResume
                 resumesAfterInterruption = false
@@ -558,10 +573,8 @@ final class ArticleAudioPlaybackController: ObservableObject {
             }
         }
 
-        private func handleRouteChange(_ notification: Notification) {
-            guard let rawReason = notification.userInfo?[
-                AVAudioSessionRouteChangeReasonKey
-            ] as? UInt,
+        private func handleRouteChange(rawReason: UInt?) {
+            guard let rawReason,
                 AVAudioSession.RouteChangeReason(rawValue: rawReason)
                     == .oldDeviceUnavailable
             else {

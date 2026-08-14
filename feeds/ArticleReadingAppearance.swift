@@ -527,7 +527,11 @@ private struct ArticleReadingAppearancePreview: View {
                     for: geometry.size.width
                 )
             )
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+            .frame(
+                maxWidth: .infinity,
+                maxHeight: .infinity,
+                alignment: .leading
+            )
             .background(appearance.theme.backgroundColor(for: colorScheme))
         }
         .frame(minHeight: 132)

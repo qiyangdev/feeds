@@ -82,7 +82,8 @@ struct feedsApp: App {
                         feedTitle: feed.title,
                         title: "Example Article",
                         urlString: "https://example.com/article",
-                        summaryText: "An example article for testing the three-column navigation.",
+                        summaryText:
+                            "An example article for testing the three-column navigation.",
                         publishedAt: Date(timeIntervalSinceReferenceDate: 3),
                         savedAt: Date(timeIntervalSinceReferenceDate: 3)
                     )
@@ -91,14 +92,17 @@ struct feedsApp: App {
                     container.mainContext.insert(
                         Article(
                             id: UITestSampleData.readArticleID,
-                            articleKey: "\(feed.id.uuidString)|read-example-article",
+                            articleKey:
+                                "\(feed.id.uuidString)|read-example-article",
                             feedID: feed.id,
                             feedTitle: feed.title,
                             title: "Read Example Article",
                             urlString: "https://example.com/read-article",
                             summaryText:
                                 "A read article used to verify the global filter preference.",
-                            publishedAt: Date(timeIntervalSinceReferenceDate: 2),
+                            publishedAt: Date(
+                                timeIntervalSinceReferenceDate: 2
+                            ),
                             savedAt: Date(timeIntervalSinceReferenceDate: 2),
                             isRead: true
                         )
@@ -116,12 +120,14 @@ struct feedsApp: App {
                     container.mainContext.insert(
                         Article(
                             id: UITestSampleData.secondArticleID,
-                            articleKey: "\(secondFeed.id.uuidString)|second-example-article",
+                            articleKey:
+                                "\(secondFeed.id.uuidString)|second-example-article",
                             feedID: secondFeed.id,
                             feedTitle: secondFeed.title,
                             title: "Second Example Article",
                             urlString: "https://second.example.com/article",
-                            summaryText: "A second article used to verify scene restoration.",
+                            summaryText:
+                                "A second article used to verify scene restoration.",
                             publishedAt: Date(
                                 timeIntervalSinceReferenceDate: 4
                             ),

@@ -31,7 +31,10 @@ nonisolated enum ArticleContentExtractor {
 
         var request = URLRequest(url: url)
         request.timeoutInterval = 30
-        request.setValue("Feeds/1.0 RSS Reader", forHTTPHeaderField: "User-Agent")
+        request.setValue(
+            "Feeds/1.0 RSS Reader",
+            forHTTPHeaderField: "User-Agent"
+        )
 
         let result: DefuddleResult
         do {

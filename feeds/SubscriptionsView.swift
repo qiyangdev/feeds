@@ -68,7 +68,10 @@ struct SubscriptionsView: View {
         Group {
             if feeds.isEmpty {
                 ContentUnavailableView {
-                    Label("No Feeds Yet", systemImage: "dot.radiowaves.left.and.right")
+                    Label(
+                        "No Feeds Yet",
+                        systemImage: "dot.radiowaves.left.and.right"
+                    )
                 } description: {
                     Text("Add an RSS or Atom feed to start reading.")
                 } actions: {
@@ -162,9 +165,10 @@ struct SubscriptionsView: View {
             )
             .receive(on: DispatchQueue.main)
         ) { notification in
-            guard let event = notification.userInfo?[
-                NSPersistentCloudKitContainer.eventNotificationUserInfoKey
-            ] as? NSPersistentCloudKitContainer.Event,
+            guard
+                let event = notification.userInfo?[
+                    NSPersistentCloudKitContainer.eventNotificationUserInfoKey
+                ] as? NSPersistentCloudKitContainer.Event,
                 event.type == .import,
                 event.endDate != nil,
                 event.succeeded
@@ -191,18 +195,18 @@ struct SubscriptionsView: View {
                 )
             }
         }
-#if os(iOS)
-        .toolbar(
-            removing: UIDevice.current.userInterfaceIdiom == .pad
-                ? .title : nil
-        )
-#endif
+        #if os(iOS)
+            .toolbar(
+                removing: UIDevice.current.userInterfaceIdiom == .pad
+                    ? .title : nil
+            )
+        #endif
         .toolbar {
-#if !os(macOS)
-            ToolbarItem(placement: .topBarLeading) {
-                if !feeds.isEmpty { EditButton() }
-            }
-#endif
+            #if !os(macOS)
+                ToolbarItem(placement: .topBarLeading) {
+                    if !feeds.isEmpty { EditButton() }
+                }
+            #endif
             ToolbarItem(placement: .primaryAction) {
                 Button {
                     presentedSheet = .add

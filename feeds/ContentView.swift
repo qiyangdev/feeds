@@ -57,9 +57,10 @@ struct ContentView: View {
             )
             .receive(on: DispatchQueue.main)
         ) { notification in
-            guard let event = notification.userInfo?[
-                NSPersistentCloudKitContainer.eventNotificationUserInfoKey
-            ] as? NSPersistentCloudKitContainer.Event,
+            guard
+                let event = notification.userInfo?[
+                    NSPersistentCloudKitContainer.eventNotificationUserInfoKey
+                ] as? NSPersistentCloudKitContainer.Event,
                 event.type == .import,
                 event.endDate != nil,
                 event.succeeded
@@ -134,15 +135,18 @@ private struct ContentNavigationView: View {
     ) -> [String] {
         guard let reference else { return [] }
         var keys = [reference.key]
-        if case .resolved(let resolvedFeedID) = ContentSceneResolver.resolveFeed(
-            id: reference.feedID,
-            feeds: feeds
-        ) {
+        if case .resolved(let resolvedFeedID) =
+            ContentSceneResolver.resolveFeed(
+                id: reference.feedID,
+                feeds: feeds
+            )
+        {
             let remoteID: Substring
             if let separator = reference.key.firstIndex(of: "|") {
-                remoteID = reference.key[
-                    reference.key.index(after: separator)...
-                ]
+                remoteID =
+                    reference.key[
+                        reference.key.index(after: separator)...
+                    ]
             } else {
                 remoteID = reference.key[...]
             }
@@ -166,8 +170,10 @@ private struct ContentNavigationView: View {
 
     private var selectedSubscription: SubscriptionSelection? {
         guard let stored = sceneState.subscription else { return nil }
-        guard case .resolved(let selection) = ContentSceneResolver
-            .resolveSubscription(stored, feeds: allFeeds)
+        guard
+            case .resolved(let selection) =
+                ContentSceneResolver
+                .resolveSubscription(stored, feeds: allFeeds)
         else {
             return nil
         }
@@ -180,12 +186,14 @@ private struct ContentNavigationView: View {
         else {
             return nil
         }
-        guard case .resolved(let article) = ContentSceneResolver.resolveArticle(
-            reference,
-            subscription: selectedSubscription,
-            feeds: allFeeds,
-            articles: articles
-        ) else {
+        guard
+            case .resolved(let article) = ContentSceneResolver.resolveArticle(
+                reference,
+                subscription: selectedSubscription,
+                feeds: allFeeds,
+                articles: articles
+            )
+        else {
             return nil
         }
         return article
@@ -288,23 +296,23 @@ private struct ContentNavigationView: View {
         } content: {
             Group {
                 if isRestoringSubscription {
-                ContentUnavailableView(
-                    "Restoring Feed",
-                    systemImage: "arrow.trianglehead.2.clockwise.rotate.90",
-                    description: Text(
-                        "Waiting for this feed to finish syncing from iCloud."
-                    )
-                )
-                .toolbar {
-                    ToolbarItem(placement: .primaryAction) {
-                        Button("Show All") {
-                            showAllArticles()
-                        }
-                        .accessibilityIdentifier(
-                            "cancelFeedRestorationButton"
+                    ContentUnavailableView(
+                        "Restoring Feed",
+                        systemImage: "arrow.trianglehead.2.clockwise.rotate.90",
+                        description: Text(
+                            "Waiting for this feed to finish syncing from iCloud."
                         )
+                    )
+                    .toolbar {
+                        ToolbarItem(placement: .primaryAction) {
+                            Button("Show All") {
+                                showAllArticles()
+                            }
+                            .accessibilityIdentifier(
+                                "cancelFeedRestorationButton"
+                            )
+                        }
                     }
-                }
                 } else {
                     FeedArticlesView(
                         selection: selectedSubscription,
@@ -354,8 +362,7 @@ private struct ContentNavigationView: View {
         }
     }
 
-    private var columnVisibilityBinding:
-        Binding<NavigationSplitViewVisibility>
+    private var columnVisibilityBinding: Binding<NavigationSplitViewVisibility>
     {
         Binding(
             get: {
@@ -408,7 +415,8 @@ private struct ContentNavigationView: View {
                     }
                     state.article = nil
                     state.wantsArticleFullScreen = false
-                    state.preferredCompactColumn = selection == nil
+                    state.preferredCompactColumn =
+                        selection == nil
                         ? .sidebar : .content
                 }
             }
@@ -588,8 +596,8 @@ private struct ContentNavigationView: View {
     }
 }
 
-private extension StoredSubscriptionSelection {
-    init(_ selection: SubscriptionSelection) {
+extension StoredSubscriptionSelection {
+    fileprivate init(_ selection: SubscriptionSelection) {
         switch selection {
         case .all:
             self = .all
@@ -599,8 +607,8 @@ private extension StoredSubscriptionSelection {
     }
 }
 
-private extension StoredArticleReference {
-    init(article: Article) {
+extension StoredArticleReference {
+    fileprivate init(article: Article) {
         self.init(
             id: article.id,
             key: article.articleKey,

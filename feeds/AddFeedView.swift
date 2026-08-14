@@ -75,7 +75,9 @@ struct AddFeedView: View {
             } header: {
                 Text("Feed")
             } footer: {
-                Text("Supports RSS 2.0 and Atom. The feed is validated and its latest articles are downloaded before it is saved.")
+                Text(
+                    "Supports RSS 2.0 and Atom. The feed is validated and its latest articles are downloaded before it is saved."
+                )
             }
 
             Section {
@@ -87,7 +89,9 @@ struct AddFeedView: View {
             } header: {
                 Text("Reading")
             } footer: {
-                Text("Extract full content when opening articles from this feed. Previously extracted articles are reused.")
+                Text(
+                    "Extract full content when opening articles from this feed. Previously extracted articles are reused."
+                )
             }
         }
         #if os(macOS)

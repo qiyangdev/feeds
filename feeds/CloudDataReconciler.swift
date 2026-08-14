@@ -43,8 +43,10 @@ nonisolated enum CloudDataReconciler {
                 if lhs.articleKey != rhs.articleKey {
                     return lhs.articleKey < rhs.articleKey
                 }
-                let lhsKey = "\(lhs.feedID.uuidString)|\(lhs.savedAt.timeIntervalSinceReferenceDate)|\(lhs.title)"
-                let rhsKey = "\(rhs.feedID.uuidString)|\(rhs.savedAt.timeIntervalSinceReferenceDate)|\(rhs.title)"
+                let lhsKey =
+                    "\(lhs.feedID.uuidString)|\(lhs.savedAt.timeIntervalSinceReferenceDate)|\(lhs.title)"
+                let rhsKey =
+                    "\(rhs.feedID.uuidString)|\(rhs.savedAt.timeIntervalSinceReferenceDate)|\(rhs.title)"
                 return lhsKey < rhsKey
             }
             for article in ordered.dropFirst() {
@@ -78,7 +80,8 @@ nonisolated enum CloudDataReconciler {
             // A subscription created after the latest tombstone is a genuine
             // re-subscription. Among active copies, the oldest ID-stable record
             // is canonical and all others become durable redirects.
-            let activeFeeds = group
+            let activeFeeds =
+                group
                 .filter { $0.deletedAt == nil }
                 .sorted(by: feedPrecedes)
             guard let canonical = activeFeeds.first else { continue }
@@ -225,8 +228,8 @@ nonisolated enum CloudDataReconciler {
             canonical.lastFetchedAt,
             duplicate.lastFetchedAt,
         ]
-            .compactMap { $0 }
-            .max()
+        .compactMap { $0 }
+        .max()
         if canonical.lastFetchedAt != mergedLastFetchedAt {
             canonical.lastFetchedAt = mergedLastFetchedAt
         }
@@ -364,7 +367,8 @@ nonisolated enum CloudDataReconciler {
             guard current.deletedAt == nil else { return .deleted }
 
             guard visitedIDs.insert(current.id).inserted else {
-                let cycle = visitedIDs
+                let cycle =
+                    visitedIDs
                     .compactMap { feedByID[$0] }
                     .filter { $0.deletedAt == nil }
                     .sorted(by: feedPrecedes)
@@ -494,7 +498,8 @@ private nonisolated struct CloudDataDryRunSnapshot: Equatable, Sendable {
                 mergedIntoFeedID: $0.mergedIntoFeedID
             )
         }.sorted { $0.persistentID < $1.persistentID }
-        articles = try modelContext.fetch(FetchDescriptor<Article>()).compactMap {
+        articles = try modelContext.fetch(FetchDescriptor<Article>()).compactMap
+        {
             guard !$0.isDeleted else { return nil }
             return ArticleRecord(
                 persistentID: $0.persistentModelID,

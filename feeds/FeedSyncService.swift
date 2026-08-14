@@ -38,17 +38,21 @@ enum FeedSyncService {
     static func normalizedURL(from input: String) throws -> URL {
         let trimmed = input.trimmingCharacters(in: .whitespacesAndNewlines)
         let candidate = trimmed.contains("://") ? trimmed : "https://\(trimmed)"
-        guard let url = URL(string: candidate), let scheme = url.scheme, ["http", "https"].contains(scheme) else {
+        guard let url = URL(string: candidate), let scheme = url.scheme,
+            ["http", "https"].contains(scheme)
+        else {
             throw FeedSyncError.invalidURL
         }
         return url
     }
 
     static func normalizedFeedURLString(_ url: URL) -> String {
-        guard var components = URLComponents(
-            url: url,
-            resolvingAgainstBaseURL: false
-        ) else {
+        guard
+            var components = URLComponents(
+                url: url,
+                resolvingAgainstBaseURL: false
+            )
+        else {
             return url.absoluteString
         }
         components.scheme = components.scheme?.lowercased()
@@ -127,11 +131,13 @@ enum FeedSyncService {
         do {
             parsed = try await fetch(url: url)
         } catch {
-            guard let currentFeed = try currentActiveFeed(
-                id: feedID,
-                expectedURLString: expectedURLString,
-                modelContext: modelContext
-            ) else {
+            guard
+                let currentFeed = try currentActiveFeed(
+                    id: feedID,
+                    expectedURLString: expectedURLString,
+                    modelContext: modelContext
+                )
+            else {
                 return
             }
             try saveRefreshError(
@@ -142,11 +148,13 @@ enum FeedSyncService {
             throw error
         }
 
-        guard let currentFeed = try currentActiveFeed(
-            id: feedID,
-            expectedURLString: expectedURLString,
-            modelContext: modelContext
-        ) else {
+        guard
+            let currentFeed = try currentActiveFeed(
+                id: feedID,
+                expectedURLString: expectedURLString,
+                modelContext: modelContext
+            )
+        else {
             return
         }
 
@@ -174,9 +182,10 @@ enum FeedSyncService {
     ) async throws -> Feed {
         let trimmedTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
         let normalizedURLString = normalizedFeedURLString(url)
-        let currentNormalizedURLString = feed.feedURL.flatMap {
-            normalizedFeedURLString($0)
-        } ?? feed.feedURLString
+        let currentNormalizedURLString =
+            feed.feedURL.flatMap {
+                normalizedFeedURLString($0)
+            } ?? feed.feedURLString
         let urlChanged = currentNormalizedURLString != normalizedURLString
 
         let replacement: (parsed: ParsedFeed, iconData: Data?)?
@@ -185,14 +194,17 @@ enum FeedSyncService {
             let activeFeeds = try modelContext.fetch(
                 FeedPersistenceQueries.activeFeeds()
             )
-            guard !activeFeeds.contains(where: {
-                guard $0.id != feed.id,
-                    let candidateURL = URL(string: $0.feedURLString)
-                else {
-                    return false
-                }
-                return normalizedFeedURLString(candidateURL) == normalizedURLString
-            }) else {
+            guard
+                !activeFeeds.contains(where: {
+                    guard $0.id != feed.id,
+                        let candidateURL = URL(string: $0.feedURLString)
+                    else {
+                        return false
+                    }
+                    return normalizedFeedURLString(candidateURL)
+                        == normalizedURLString
+                })
+            else {
                 throw FeedSyncError.duplicateFeed
             }
 
@@ -212,9 +224,11 @@ enum FeedSyncService {
             let activeFeeds = try modelContext.fetch(
                 FeedPersistenceQueries.activeFeeds()
             )
-            guard let currentFeed = activeFeeds.first(where: {
-                $0.id == feed.id
-            }) else {
+            guard
+                let currentFeed = activeFeeds.first(where: {
+                    $0.id == feed.id
+                })
+            else {
                 throw FeedSyncError.feedNoLongerActive
             }
 
@@ -281,9 +295,11 @@ enum FeedSyncService {
             let feeds = try modelContext.fetch(
                 FeedPersistenceQueries.feeds(id: feed.id)
             )
-            guard let currentFeed = feeds.first(where: {
-                $0.id == feed.id && $0.isActive
-            }) else {
+            guard
+                let currentFeed = feeds.first(where: {
+                    $0.id == feed.id && $0.isActive
+                })
+            else {
                 return
             }
             currentFeed.deletedAt = .now
@@ -345,11 +361,19 @@ enum FeedSyncService {
     private static func fetch(url: URL) async throws -> ParsedFeed {
         var request = URLRequest(url: url)
         request.timeoutInterval = 20
-        request.setValue("Feeds/1.0 RSS Reader", forHTTPHeaderField: "User-Agent")
-        request.setValue("application/rss+xml, application/atom+xml, application/xml, text/xml, */*", forHTTPHeaderField: "Accept")
+        request.setValue(
+            "Feeds/1.0 RSS Reader",
+            forHTTPHeaderField: "User-Agent"
+        )
+        request.setValue(
+            "application/rss+xml, application/atom+xml, application/xml, text/xml, */*",
+            forHTTPHeaderField: "Accept"
+        )
 
         let (data, response) = try await URLSession.shared.data(for: request)
-        guard let httpResponse = response as? HTTPURLResponse else { throw FeedSyncError.invalidResponse }
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw FeedSyncError.invalidResponse
+        }
         guard (200..<300).contains(httpResponse.statusCode) else {
             throw FeedSyncError.httpStatus(httpResponse.statusCode)
         }
@@ -387,9 +411,11 @@ enum FeedSyncService {
         feed.lastError = nil
 
         let incomingArticleKeys = Array(
-            Set(parsed.entries.map { entry in
-                "\(feed.id.uuidString)|\(entry.id)"
-            })
+            Set(
+                parsed.entries.map { entry in
+                    "\(feed.id.uuidString)|\(entry.id)"
+                }
+            )
         ).sorted()
         var feedArticles: [Article] = []
         // Keep each SQL `IN` clause bounded for unusually large feeds while
